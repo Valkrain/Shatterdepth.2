@@ -1,0 +1,262 @@
+GUNS (12)
+================================================================================
+1. Pulse Carbine (PULSE_CARBINE)
+   - Damage Type: Kinetic
+   - Damage: 14 | Cooldown: 0.14s | Pellets: 1 | Speed: 380 | Spread: 0.04
+   - Blast Radius: 3.2 | Blast Power: 3 | Pierce: 0 | Gravity: 25
+   - Description: Rapid kinetic bolts that shred wood, dirt, and jars; deflects off heavy metal.
+
+2. Ember Scattergun (EMBER_SCATTER)
+   - Damage Type: Thermal
+   - Damage: 9 x 5 pellets | Cooldown: 0.42s | Speed: 310 | Spread: 0.24
+   - Blast Radius: 2.8 | Blast Power: 2 | Pierce: 0 | Gravity: 60 | Ignites: Yes
+   - Description: Five-pellet thermal burst that chars timber, moss, and oil vats; weak vs stone.
+
+3. Flak Cannon (FLAK_CANNON)
+   - Damage Type: Explosive
+   - Damage: 32 | Cooldown: 0.56s | Pellets: 1 | Speed: 260 | Spread: 0.05
+   - Blast Radius: 11.0 | Blast Power: 6 | Pierce: 0 | Gravity: 160
+   - Description: Heavy explosive shells built to shatter brick, stone pillars, and crystal.
+
+4. Plasma Railgun (PLASMA_RAIL)
+   - Damage Type: Plasma
+   - Damage: 44 | Cooldown: 0.65s | Pellets: 1 | Speed: 540 | Spread: 0.01
+   - Blast Radius: 4.5 | Blast Power: 8 | Pierce: 5 | Gravity: 0 | Ignites: Yes
+   - Description: Superheated piercing slug that bores cleanly through stone, brick, and metal.
+
+5. Arc Caster (ARC_CASTER)
+   - Damage Type: Arc
+   - Damage: 16 x 2 pellets | Cooldown: 0.24s | Speed: 410 | Spread: 0.09
+   - Blast Radius: 4.0 | Blast Power: 4 | Pierce: 1 | Gravity: 0
+   - Description: Twin arc bolts that shatter crystal and fry metal chains; insulated by dirt and wood.
+
+6. Vitriol Mortar (ACID_MORTAR)
+   - Damage Type: Corrosive
+   - Damage: 24 | Cooldown: 0.48s | Pellets: 1 | Speed: 230 | Spread: 0.06
+   - Blast Radius: 8.0 | Blast Power: 4 | Pierce: 0 | Gravity: 230 | Acid Splash: Yes
+   - Description: Corrosive shells that dissolve metal plates and masonry; crystal and gold resist acid.
+
+7. Cutter Beam (MINING_BEAM)
+   - Damage Type: Laser
+   - Damage: 5 (Continuous Beam) | Cooldown: 0.06s | Speed: 460 | Spread: 0.01
+   - Blast Radius: 3.4 | Blast Power: 7 | Pierce: 0 | Gravity: 0
+   - Description: Precision laser cutter effective across stone, crystal, brick, and timber.
+
+8. Cryo Blaster (CRYOMANCER_BLASTER)
+   - Damage Type: Cryogenic
+   - Damage: 18 | Cooldown: 0.18s | Pellets: 1 | Speed: 420 | Spread: 0.02
+   - Blast Radius: 4.2 | Blast Power: 4 | Pierce: 1 | Gravity: 0
+   - Description: Frigid energy bolts that brittle stone and freeze targets solid.
+
+9. Sonic Repeater (SONIC_REPEATER)
+   - Damage Type: Sonic
+   - Damage: 12 | Cooldown: 0.12s | Pellets: 1 | Speed: 500 | Spread: 0.03
+   - Blast Radius: 6.0 | Blast Power: 5 | Pierce: 2 | Gravity: 0
+   - Description: Vibrational pulse rifle that shakes brick and stone foundations loose instantly.
+
+10. Void Singularity (VOID_SINGULARITY_GUN)
+    - Damage Type: Void
+    - Damage: 55 | Cooldown: 0.75s | Pellets: 1 | Speed: 280 | Spread: 0.01
+    - Blast Radius: 14.0 | Blast Power: 9 | Pierce: 4 | Gravity: 10
+    - Description: Fires microscopic black holes that pull in nearby pixels, debris, and enemies.
+
+11. Chain Minigun (HEAVY_CHAIN_MINIGUN)
+    - Damage Type: Kinetic
+    - Damage: 7 | Cooldown: 0.05s | Pellets: 1 | Speed: 520 | Spread: 0.08
+    - Blast Radius: 2.5 | Blast Power: 2 | Pierce: 0 | Gravity: 30
+    - Description: Sustained high-rate kinetic lead shredder for rapid excavation.
+
+12. Graviton Cannon (GRAVITON_CANNON)
+    - Damage Type: Explosive
+    - Damage: 48 | Cooldown: 0.85s | Pellets: 1 | Speed: 240 | Spread: 0.02
+    - Blast Radius: 16.0 | Blast Power: 10 | Pierce: 0 | Gravity: 140
+    - Description: Heavy gravity shock launcher that causes catastrophic structural collapses.
+
+
+DAMAGE TYPES (10)
+================================================================================
+1. Kinetic (KINETIC)
+   - Material Multipliers: Jar (2.0x), Barrel (1.8x), Banner (1.6x), Sand (1.5x), Moss (1.5x), Ash (1.5x), Torch (1.5x), Dirt (1.45x), Wood (1.35x), Gold (1.3x), Rubble (1.1x), Crystal (0.95x), Brick (0.78x), Chain (0.65x), Stone (0.35x), Metal (0.22x)
+
+2. Explosive (EXPLOSIVE)
+   - Material Multipliers: Barrel (2.5x), Jar (2.4x), Brick (2.2x), Crystal (2.2x), Ash (2.0x), Rubble (2.0x), Sand (1.9x), Stone (1.85x), Dirt (1.8x), Banner (1.8x), Torch (1.8x), Moss (1.7x), Gold (1.6x), Wood (1.5x), Metal (0.65x)
+
+3. Thermal (THERMAL)
+   - Material Multipliers: Moss (3.0x), Banner (3.0x), Barrel (3.0x), Wood (2.8x), Oil (2.5x), Dirt (1.2x), Jar (0.8x), Gold (0.6x), Crystal (0.55x), Brick (0.5x), Metal (0.45x), Chain (0.45x), Stone (0.4x)
+
+4. Plasma (PLASMA)
+   - Material Multipliers: Barrel (2.5x), Oil (2.0x), Chain (1.7x), Metal (1.65x), Stone (1.6x), Wood (1.6x), Rubble (1.5x), Brick (1.45x), Crystal (1.4x), Gold (1.4x), Sand (1.35x)
+
+5. Arc (ARC)
+   - Material Multipliers: Crystal (3.0x), Chain (2.6x), Metal (2.3x), Barrel (1.8x), Jar (1.7x), Gold (1.5x), Water (1.5x), Rubble (0.7x), Stone (0.6x), Brick (0.55x), Moss (0.4x), Wood (0.35x), Dirt (0.3x), Sand (0.25x)
+
+6. Corrosive (CORROSIVE)
+   - Material Multipliers: Metal (2.6x), Chain (2.2x), Moss (1.8x), Brick (1.6x), Stone (1.4x), Rubble (1.35x), Dirt (1.25x), Wood (0.9x), Crystal (0.15x), Gold (0.1x)
+
+7. Laser (LASER)
+   - Material Multipliers: Crystal (1.7x), Gold (1.6x), Moss (1.6x), Banner (1.6x), Stone (1.55x), Ash (1.5x), Jar (1.5x), Chain (1.5x), Torch (1.5x), Wood (1.45x), Dirt (1.4x), Sand (1.4x), Rubble (1.4x), Brick (1.35x), Metal (0.75x)
+
+8. Cryogenic (CRYOGENIC)
+   - Material Multipliers: Lava (1.6x); freezes and brittles stone and targets.
+
+9. Sonic (SONIC)
+   - High-frequency structural vibration that loosens brick and stone foundations.
+
+10. Void (VOID)
+    - Gravitational singularity damage that pulls in surrounding terrain pixels, debris, and enemies.
+
+
+ENEMIES (8 Combat Enemies + 4 Hub Target Dummies)
+================================================================================
+1. Crawler (CRAWLER)
+   - Role: Fast ground melee rusher
+   - Base HP: 26 | Size: 9x8 | Attack Cooldown: 0.7s | Base Gold: 6 (+2/depth)
+   - Biomes: All biomes
+
+2. Drone (DRONE)
+   - Role: Hovering aerial ranged unit
+   - Base HP: 28 | Size: 9x7 | Attack Cooldown: 1.2s | Base Gold: 8 (+2/depth)
+   - Biomes: All biomes
+
+3. Slime (SLIME)
+   - Role: Corrosive ground hopper
+   - Base HP: 34 | Size: 9x8 | Attack Cooldown: 0.9s | Base Gold: 9 (+2/depth)
+   - Biomes: All biomes (heaviest in Vitriol Vaults)
+
+4. Pyro Imp (PYRO_IMP)
+   - Role: Aerial thermal projectile caster
+   - Base HP: 36 | Size: 10x10 | Attack Cooldown: 1.1s | Base Gold: 13 (+2/depth)
+   - Biomes: Ashen Foundry
+
+5. Crystal Wisp (CRYSTAL_WISP)
+   - Role: Aerial prism energy caster
+   - Base HP: 40 | Size: 9x11 | Attack Cooldown: 1.35s | Base Gold: 14 (+2/depth)
+   - Biomes: Vitriol Vaults, Sunken Masonry
+
+6. Turret (TURRET)
+   - Role: Stationary armored auto-cannon
+   - Base HP: 42 | Size: 9x9 | Attack Cooldown: 1.6s | Base Gold: 12 (+2/depth)
+   - Biomes: All biomes (Depth 2+ and Gauntlet rooms)
+
+7. Sentinel (SENTINEL)
+   - Role: Armored ground ranged soldier
+   - Base HP: 62 | Size: 11x15 | Attack Cooldown: 1.4s | Base Gold: 16 (+3/depth)
+   - Biomes: All biomes
+
+8. Stone Warden (STONE_WARDEN)
+   - Role: Heavy masonry juggernaut
+   - Base HP: 78 | Size: 13x17 | Attack Cooldown: 1.5s | Base Gold: 20 (+3/depth)
+   - Biomes: Sunken Masonry
+
+Hub Target Range Dummies (Auto-Respawning):
+- Light Dummy: 120 HP (10x18)
+- High Perch Dummy: 150 HP (10x18)
+- Armored Dummy: 260 HP (11x19)
+- Heavy Plating Dummy: 450 HP (12x20)
+
+
+BIOMES (3 Run Biomes + 1 Hub World)
+================================================================================
+1. Sunken Masonry (SUNKEN_MASONRY)
+   - Archetype: Flooded limestone & slate ruins shifting into abyssal indigo and bioluminescent teal
+   - Primary Liquid: Water (Mat.WATER)
+   - Preferred Rooms: Ruin, Catacomb, Bridge, Gauntlet, Shaft, Vault
+   - Depth Atmosphere Titles:
+     * Depths 1-3: Tidal Cavern
+     * Depths 4-9: Deep Slate Grotto
+     * Depths 10-15: Abyssal Masonry
+     * Depths 16+: Hadal Trench
+   - Boss Title & Weak Spot: Monolith Warden (Weak Spot: Sapphire Core)
+
+2. Ashen Foundry (ASHEN_FOUNDRY)
+   - Archetype: Smoky basalt & kiln brick smelteries shifting into superheated magma crimson & amber-gold
+   - Primary Liquid: Oil (Mat.OIL) + Contained Molten Lava Vats (Mat.LAVA)
+   - Preferred Rooms: Foundry Chamber, Bridge, Gauntlet, Ruin, Shaft, Vault
+   - Depth Atmosphere Titles:
+     * Depths 1-3: Smoldering Forge
+     * Depths 4-9: Cinder Smeltery
+     * Depths 10-15: Magma Ducts
+     * Depths 16+: Crucible Core
+   - Boss Title & Weak Spot: Slag Colossus (Weak Spot: Furnace Heart)
+
+3. Vitriol Vaults (VITRIOL_VAULTS)
+   - Archetype: Crystalline caverns rotating across emerald-jade, prism-aqua, and amethyst-quartz mineral harmonics
+   - Primary Liquid: Acid (Mat.ACID)
+   - Preferred Rooms: Crystal Grotto, Bridge, Shaft, Catacomb, Vault
+   - Depth Atmosphere Titles:
+     * Depths 1-3: Jade Fracture
+     * Depths 4-9: Prismatic Vault
+     * Depths 10-15: Amethyst Fault
+     * Depths 16+: Astral Geode
+   - Boss Title & Weak Spot: Sovereign Spire (Weak Spot: Crystal Nucleus)
+
+4. Bastion Hub / Subterranean Bastion (HUB_WORLD)
+   - Archetype: Foundry Bastion Safe Haven
+   - Wings & Features:
+     * West Archive Alcove: Houses The Archivist (Keeper of Fractured Annals) and upper Archive Gallery
+     * Central Foundry Hearth: Molten grate walkway, Class/Vault Pedestal, and Controls/Settings Pedestal
+     * Upper Target Range Deck: 4 live auto-respawning target dummies and elevated perch catwalk
+     * East Expedition Staging Dais: Expedition Descent Portal and Loadout Staging Pedestal
+
+
+BOSS PARTS & MODULAR SPECIALS
+================================================================================
+Bosses are procedurally assembled 112x112 pixel colossi built from 5 modular categories.
+Severing a destructible part (Crown, Left Limb, Right Limb, Base) disables its special attacks.
+
+1. Hull / Core Torso Styles (4 - Central Chassis)
+   - CITADEL ("Citadel") -> Special: Fortress Siege Wall (HULL_CITADEL)
+   - BOILER ("Juggernaut") -> Special: Pressure Vent Nova (HULL_BOILER)
+   - DIAMOND ("Prism") -> Special: Refraction Matrix (HULL_DIAMOND)
+   - RIBCAGE ("Automaton") -> Special: Heartcore Pulsar (HULL_RIBCAGE)
+
+2. Crown / Head Styles (5 - Destructible Upper Segment)
+   - HORNED (Horn Crown / Prefix: "Horned") -> Special: Horned Tempest (CROWN_HORNED)
+   - SMOKESTACKS (Smokestacks / Prefix: "Foundry-Stack") -> Special: Cinder Rain Mortar (CROWN_SMOKESTACKS)
+   - DOME (Prism Dome / Prefix: "Vaulted") -> Special: Orbital Prism Dome (CROWN_DOME)
+   - PRONG_SPIRE (Rail Spire / Prefix: "Spire-Crowned") -> Special: Apex Rail Lance (CROWN_PRONG_SPIRE)
+   - TURRET_CAP (Turret Cap / Prefix: "Bastion") -> Special: Auto-Cannon Sweep (CROWN_TURRET_CAP)
+
+3. Limb / Wing Styles (5 - Independently Mounted on Left/Port & Right/Starboard; Destructible)
+   - PAULDRON_ARM (Gauntlet Arm)
+     * Port Special: Port Seismic Slam (LEFT_PAULDRON_ARM)
+     * Starboard Special: Starboard Seismic Slam (RIGHT_PAULDRON_ARM)
+   - CANNON_POD (Cannon Pod)
+     * Port Special: Port Artillery Salvo (LEFT_CANNON_POD)
+     * Starboard Special: Starboard Artillery Salvo (RIGHT_CANNON_POD)
+   - CRYSTAL_WING (Crystal Wing)
+     * Port Special: Port Featherblade (LEFT_CRYSTAL_WING)
+     * Starboard Special: Starboard Featherblade (RIGHT_CRYSTAL_WING)
+   - SHIELD_PLATE (Aegis Shield)
+     * Port Special: Port Aegis Repulsor (LEFT_SHIELD_PLATE)
+     * Starboard Special: Starboard Aegis Repulsor (RIGHT_SHIELD_PLATE)
+   - CLAW_PINCER (Pincer Claw)
+     * Port Special: Port Viper Pincer (LEFT_CLAW_PINCER)
+     * Starboard Special: Starboard Viper Pincer (RIGHT_CLAW_PINCER)
+
+4. Base / Locomotion Styles (4 - Destructible Undercarriage)
+   - PILLAR_LEGS (Pillar Legs) -> Special: Titan Earthquake (BASE_PILLAR_LEGS)
+   - TANK_TREADS (Tank Treads) -> Special: Juggernaut Overrun (BASE_TANK_TREADS)
+   - THRUSTER_BELLS (Thrusters) -> Special: Afterburner Carpet Bomb (BASE_THRUSTER_BELLS)
+   - SPIKE_KEEL (Spike Keel) -> Special: Meteor Keel Drop (BASE_SPIKE_KEEL)
+
+5. Core Weak-Spot Slots & Shapes (5 Slots / 3 Geometry Shapes)
+   - CHEST (Chest-Core) -> Special: Chest-Core Overdrive (CORE_RESONANCE_CHEST)
+   - CROWN (Crown-Node) -> Special: Crown-Node Overload (CORE_RESONANCE_CROWN)
+   - LEFT_POD (Port-Reactor) -> Special: Port-Reactor Surge (CORE_RESONANCE_LEFT_POD)
+   - RIGHT_POD (Starboard-Reactor) -> Special: Starboard-Reactor Surge (CORE_RESONANCE_RIGHT_POD)
+   - KEEL (Keel-Core) -> Special: Keel-Core Eruption (CORE_RESONANCE_KEEL)
+   - Core Geometry Shapes: ORB, DIAMOND, SLIT (ringed by a segmented Gold protective collar bezel)
+
+6. Synergy Combo Attacks (11 Part-Combination Specials)
+   - Infernal Overpressure (COMBO_INFERNAL_OVERPRESSURE): Requires BOILER Hull + SMOKESTACKS Crown
+   - Bastion Siege Barrage (COMBO_BASTION_SIEGE): Requires CITADEL Hull + TURRET_CAP Crown
+   - Prismatic Annihilation (COMBO_PRISMATIC_ANNIHILATION): Requires DIAMOND Hull + PRONG_SPIRE Crown
+   - Rend & Harvest (COMBO_REND_HARVEST): Requires RIBCAGE Hull + CLAW_PINCER Limb
+   - Seraphim Crystal Dive (COMBO_SERAPHIM_DIVE): Requires CRYSTAL_WING Limb + THRUSTER_BELLS Base
+   - Blitzkrieg Rolling Thunder (COMBO_BLITZKRIEG_THUNDER): Requires TANK_TREADS Base + CANNON_POD Limb
+   - Cataclysm Piledriver (COMBO_CATACLYSM_PILEDRIVER): Requires HORNED Crown + SPIKE_KEEL Base
+   - Phalanx Crusher (COMBO_PHALANX_CRUSHER): Requires PAULDRON_ARM Limb + SHIELD_PLATE Limb
+   - Broadside Obliteration (COMBO_BROADSIDE_OBLITERATION): Requires Dual CANNON_POD Limbs
+   - Solar Eclipse Featherstorm (COMBO_SOLAR_ECLIPSE): Requires Dual CRYSTAL_WING Limbs
+   - Sanctum Tremor Burst (COMBO_SANCTUM_TREMOR): Requires DOME Crown + PILLAR_LEGS Base
