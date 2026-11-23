@@ -18,9 +18,11 @@ import {
   Share,
   X,
   Crosshair,
+  Music,
 } from 'lucide-react';
 import { BIOMES, CLASSES } from './engine/catalog';
 import { GameEngine } from './engine/GameEngine';
+import { rockMusic } from './engine/RockMusicEngine';
 import { sfx } from './engine/SoundFX';
 import {
   ClassId,
@@ -37,7 +39,13 @@ import { enterImmersiveFullscreen, useFullscreenAndInstall } from './hooks/useFu
 
 const META_KEY = 'shatterdepth_meta_v1';
 
-const DEFAULT_META: MetaProgress = {
+const DEFAULT_SLOT_META: MetaProgress = {
+  persistentGold: 0,
+  maxHpLevel: 0,
+  startBombsLevel: 0,
+  damageLevel: 0,
+  speedLevel: 0,
+  armorLevel: 0,
   bestDepth: 0,
   bestGold: 0,
   totalPixelsDestroyed: 0,
@@ -45,22 +53,26 @@ const DEFAULT_META: MetaProgress = {
   runsCompleted: 0,
 };
 
-function loadMeta(): MetaProgress {
+function loadSlotMeta(slotId: number): MetaProgress {
   try {
-    const raw = localStorage.getItem(META_KEY);
-    if (!raw) return DEFAULT_META;
-    return { ...DEFAULT_META, ...JSON.parse(raw) };
+    const raw = localStorage.getItem(`shatterdepth_save_slot_${slotId}`);
+    if (!raw) return DEFAULT_SLOT_META;
+    return { ...DEFAULT_SLOT_META, ...JSON.parse(raw) };
   } catch {
-    return DEFAULT_META;
+    return DEFAULT_SLOT_META;
   }
 }
 
-function saveMeta(meta: MetaProgress): void {
+function saveSlotMeta(slotId: number, meta: MetaProgress): void {
   try {
-    localStorage.setItem(META_KEY, JSON.stringify(meta));
-  } catch {
-    // Ignore storage quota errors
-  }
+    localStorage.setItem(`shatterdepth_save_slot_${slotId}`, JSON.stringify(meta));
+  } catch {}
+}
+
+function deleteSlotMeta(slotId: number): void {
+  try {
+    localStorage.removeItem(`shatterdepth_save_slot_${slotId}`);
+  } catch {}
 }
 
 function randomSeed(): number {
@@ -80,10 +92,12 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<GameEngine | null>(null);
 
-  const [gameState, setGameState] = useState<GameState>('TITLE_MENU');
+  const [gameState, setGameState] = useState<GameState>('START_SCREEN');
   const [selectedClass, setSelectedClass] = useState<ClassId>('BREACHER');
   const [seedInput, setSeedInput] = useState<string>(() => String(randomSeed()));
+  const [previousSeed, setPreviousSeed] = useState<string | null>(null);
   const [muted, setMuted] = useState<boolean>(false);
+  const [isRockPlaying, setIsRockPlaying] = useState<boolean>(false);
   const [isTouchMode, setIsTouchMode] = useState<boolean>(() => detectTouchDevice());
   const [isPortrait, setIsPortrait] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerHeight > window.innerWidth : false
@@ -93,7 +107,57 @@ export default function App() {
   const [upgradeChoices, setUpgradeChoices] = useState<PerkDef[]>([]);
   const [bossRelicChoices, setBossRelicChoices] = useState<RelicDraftOption[]>([]);
   const [gameOverStats, setGameOverStats] = useState<RunStats | null>(null);
-  const [meta, setMeta] = useState<MetaProgress>(() => loadMeta());
+
+  const [activeSlot, setActiveSlot] = useState<number>(() => {
+    try {
+      const active = localStorage.getItem('shatterdepth_active_slot');
+      return active ? parseInt(active, 10) : 1;
+    } catch {
+      return 1;
+    }
+  });
+  const [meta, setMeta] = useState<MetaProgress>(() => loadSlotMeta(activeSlot));
+  const [activeHubModal, setActiveHubModal] = useState<'NONE' | 'VAULT' | 'EXPEDITION'>('NONE');
+  const [showStartSettings, setShowStartSettings] = useState<boolean>(false);
+
+  const handleSelectSlot = (slotId: number) => {
+    setActiveSlot(slotId);
+    try {
+      localStorage.setItem('shatterdepth_active_slot', String(slotId));
+    } catch {}
+    setMeta(loadSlotMeta(slotId));
+  };
+
+  const handleDeleteSlot = (slotId: number) => {
+    deleteSlotMeta(slotId);
+    if (slotId === activeSlot) {
+      setMeta(DEFAULT_SLOT_META);
+    }
+  };
+
+  const tryAutoRotate = () => {
+    try {
+      const orientation = screen.orientation as ScreenOrientation & {
+        lock?: (o: string) => Promise<void>;
+      };
+      if (orientation?.lock) {
+        orientation.lock('landscape').catch(() => {});
+      }
+    } catch {}
+    enterImmersiveFullscreen();
+  };
+
+  useEffect(() => {
+    tryAutoRotate();
+  }, []);
+
+  const handleEnterHubFromStart = (slotId: number) => {
+    handleSelectSlot(slotId);
+    tryAutoRotate();
+    setActiveHubModal('NONE');
+    engineRef.current?.loadHubWorld();
+  };
+
   const [showIOSInstallGuide, setShowIOSInstallGuide] = useState<boolean>(false);
 
   const {
@@ -173,22 +237,34 @@ export default function App() {
       onBossRelicChoices: (choices) => setBossRelicChoices(choices),
       onGameOver: (stats) => {
         setGameOverStats(stats);
+        setPreviousSeed(String(stats.seed));
+        setSeedInput(String(randomSeed()));
         setMeta((prev) => {
           const next: MetaProgress = {
+            ...prev,
+            persistentGold: prev.persistentGold + stats.goldCollected,
             bestDepth: Math.max(prev.bestDepth, stats.depth),
             bestGold: Math.max(prev.bestGold, stats.goldCollected),
             totalPixelsDestroyed: prev.totalPixelsDestroyed + stats.pixelsDestroyed,
             totalCollapses: prev.totalCollapses + stats.segmentsCollapsed,
             runsCompleted: prev.runsCompleted + 1,
           };
-          saveMeta(next);
+          saveSlotMeta(activeSlot, next);
           return next;
         });
+      },
+      onOpenVaultModal: () => setActiveHubModal('VAULT'),
+      onOpenExpeditionModal: () => setActiveHubModal('EXPEDITION'),
+      onOpenSettingsModal: () => {
+        engineRef.current?.loadTitlePreview(parsedSeed());
+        setGameState('START_SCREEN');
       },
     });
 
     engineRef.current = engine;
     engine.startLoop();
+    engine.loadTitlePreview(parsedSeed());
+    engine.setState('START_SCREEN');
 
     return () => {
       engine.destroy();
@@ -204,19 +280,25 @@ export default function App() {
   const handleRandomizeSeed = () => {
     const next = randomSeed();
     setSeedInput(String(next));
-    if (gameState === 'TITLE_MENU') {
+    if (gameState === 'HUB_WORLD') {
       engineRef.current?.loadTitlePreview(next);
     }
   };
 
   const handleStartRun = () => {
     enterImmersiveFullscreen();
-    engineRef.current?.startNewRun(selectedClass, parsedSeed());
+    const s = parsedSeed();
+    setPreviousSeed(String(s));
+    setSeedInput(String(randomSeed()));
+    engineRef.current?.startNewRun(selectedClass, s, meta);
   };
 
   const handleStartBossRun = () => {
     enterImmersiveFullscreen();
-    engineRef.current?.startBossRun(selectedClass, parsedSeed(), 10);
+    const s = parsedSeed();
+    setPreviousSeed(String(s));
+    setSeedInput(String(randomSeed()));
+    engineRef.current?.startBossRun(selectedClass, s, meta, 10);
   };
 
   const handleToggleMute = () => {
@@ -234,9 +316,23 @@ export default function App() {
     engineRef.current?.setState('PAUSED');
   };
 
-  const handleReturnTitle = () => {
-    engineRef.current?.loadTitlePreview(parsedSeed());
-    engineRef.current?.setState('TITLE_MENU');
+  const handleReturnHub = () => {
+    setActiveHubModal('NONE');
+    enterImmersiveFullscreen();
+    engineRef.current?.loadHubWorld();
+  };
+
+  const handleBuyUpgrade = (key: keyof MetaProgress, cost: number) => {
+    if (meta.persistentGold < cost) return;
+    setMeta((prev) => {
+      const next = {
+        ...prev,
+        persistentGold: prev.persistentGold - cost,
+        [key]: (prev[key] as number) + 1,
+      };
+      saveSlotMeta(activeSlot, next);
+      return next;
+    });
   };
 
   const handlePickUpgrade = (perk: PerkDef) => {
@@ -415,7 +511,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (gameState !== 'PLAYING' || isPortrait) {
+    if ((gameState !== 'PLAYING' && gameState !== 'HUB_WORLD') || isPortrait) {
       resetThumbstick();
       resetAimStick();
     }
@@ -432,11 +528,11 @@ export default function App() {
       {/* Live Per-Pixel Simulation Canvas */}
       <canvas
         ref={canvasRef}
-        className={`block w-full h-full pixel-canvas ${gameState === 'PLAYING' ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`block w-full h-full pixel-canvas ${gameState === 'PLAYING' || gameState === 'HUB_WORLD' ? 'cursor-crosshair' : 'cursor-default'}`}
       />
 
       {/* Active Gameplay HUD */}
-      {gameState === 'PLAYING' && hud && !isPortrait && (
+      {(gameState === 'PLAYING' || gameState === 'HUB_WORLD') && hud && !isPortrait && (
         <div className="pointer-events-none fixed inset-0 flex flex-col justify-between px-3 py-2 sm:p-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-[max(0.5rem,env(safe-area-inset-top))]">
           {/* Top Compact Bar */}
           <div className="flex items-start justify-between gap-2 sm:gap-4">
@@ -507,9 +603,11 @@ export default function App() {
                 </div>
                 <div
                   className="flex items-center justify-between gap-2 text-[10px] sm:text-[11px] font-mono-tabular"
-                  style={{ color: activePalette.accentSoftHex }}
+                  style={{ color: hud.boss.activeAttack ? '#FDE047' : activePalette.accentSoftHex }}
                 >
-                  <span className="truncate">{hud.boss.weakSpotName}</span>
+                  <span className="truncate font-semibold">
+                    {hud.boss.activeAttack ? `⚡ ${hud.boss.activeAttack}` : hud.boss.weakSpotName}
+                  </span>
                   <span className="whitespace-nowrap">{hud.boss.corePct}%</span>
                 </div>
               </div>
@@ -521,24 +619,45 @@ export default function App() {
                   borderColor: activePalette.accentBorder,
                 }}
               >
-                <span
-                  className="font-semibold font-mono-tabular whitespace-nowrap"
-                  style={{ color: activePalette.accentSoftHex }}
-                >
-                  Depth {hud.depth}
-                </span>
-                <span aria-hidden="true" className="text-zinc-600">·</span>
-                <span className="whitespace-nowrap truncate max-w-[120px] sm:max-w-none">{hud.biomeName}</span>
-                <span aria-hidden="true" className="hidden md:inline text-zinc-600">·</span>
-                <span className="hidden md:inline text-zinc-400 whitespace-nowrap">{activePalette.atmosphereTitle}</span>
-                <span aria-hidden="true" className="hidden lg:inline text-zinc-600">·</span>
-                <span className="hidden lg:inline font-mono-tabular text-zinc-400 whitespace-nowrap">
-                  Seed {hud.seed}
-                </span>
-                <span aria-hidden="true" className="hidden sm:inline text-zinc-600">·</span>
-                <span className="hidden sm:inline font-mono-tabular text-zinc-400 whitespace-nowrap">
-                  {hud.enemiesRemaining} Hostiles
-                </span>
+                {gameState === 'HUB_WORLD' ? (
+                  <>
+                    <span
+                      className="font-semibold font-mono-tabular whitespace-nowrap"
+                      style={{ color: activePalette.accentSoftHex }}
+                    >
+                      Bastion Hub
+                    </span>
+                    <span aria-hidden="true" className="text-zinc-600">·</span>
+                    <span className="whitespace-nowrap truncate max-w-[140px] sm:max-w-none">{hud.biomeName}</span>
+                    <span aria-hidden="true" className="hidden md:inline text-zinc-600">·</span>
+                    <span className="hidden md:inline text-zinc-400 whitespace-nowrap">{activePalette.atmosphereTitle}</span>
+                    <span aria-hidden="true" className="hidden sm:inline text-zinc-600">·</span>
+                    <span className="hidden sm:inline font-mono-tabular text-emerald-300/90 whitespace-nowrap">
+                      Safe Haven
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      className="font-semibold font-mono-tabular whitespace-nowrap"
+                      style={{ color: activePalette.accentSoftHex }}
+                    >
+                      Depth {hud.depth}
+                    </span>
+                    <span aria-hidden="true" className="text-zinc-600">·</span>
+                    <span className="whitespace-nowrap truncate max-w-[120px] sm:max-w-none">{hud.biomeName}</span>
+                    <span aria-hidden="true" className="hidden md:inline text-zinc-600">·</span>
+                    <span className="hidden md:inline text-zinc-400 whitespace-nowrap">{activePalette.atmosphereTitle}</span>
+                    <span aria-hidden="true" className="hidden lg:inline text-zinc-600">·</span>
+                    <span className="hidden lg:inline font-mono-tabular text-zinc-400 whitespace-nowrap">
+                      Seed {hud.seed}
+                    </span>
+                    <span aria-hidden="true" className="hidden sm:inline text-zinc-600">·</span>
+                    <span className="hidden sm:inline font-mono-tabular text-zinc-400 whitespace-nowrap">
+                      {hud.enemiesRemaining} Hostiles
+                    </span>
+                  </>
+                )}
               </div>
             )}
 
@@ -589,6 +708,21 @@ export default function App() {
                 className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-md text-zinc-300 hover:text-white hover:bg-white/10 transition-colors focus-visible:outline-2 focus-visible:outline-amber-400"
               >
                 {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  const playing = rockMusic.togglePlay();
+                  setIsRockPlaying(playing);
+                }}
+                aria-label={isRockPlaying ? 'Stop guitar rock music' : 'Play guitar rock music'}
+                className={`min-h-[38px] min-w-[38px] flex items-center justify-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-amber-400 ${
+                  isRockPlaying ? 'text-amber-400 bg-amber-400/20' : 'text-zinc-300 hover:text-white hover:bg-white/10'
+                }`}
+                title="Toggle Guitar Rock BGM"
+              >
+                <Music className="w-4 h-4" />
               </button>
               <button
                 type="button"
@@ -837,102 +971,321 @@ export default function App() {
         </div>
       )}
 
-      {/* Title Screen Overlay */}
-      {gameState === 'TITLE_MENU' && !isPortrait && (
-        <div className="fixed inset-0 overflow-y-auto bg-gradient-to-t from-[#0C0E12] via-[#0C0E12]/75 to-[#0C0E12]/45 flex p-3 sm:p-6">
-          <div className="m-auto w-full max-w-4xl bg-[#141820]/95 border border-white/10 rounded-xl p-4 sm:p-7 md:p-9 shadow-2xl">
-            <div className="flex flex-row items-end justify-between gap-4 pb-4 sm:pb-5 border-b border-white/10">
+      {/* Start Screen (Save Selection & Settings) */}
+      {gameState === 'START_SCREEN' && !isPortrait && (
+        <div className="fixed inset-0 overflow-y-auto bg-gradient-to-t from-[#0C0E12] via-[#0C0E12]/90 to-[#0C0E12]/60 flex p-4 sm:p-8">
+          <div className="m-auto w-full max-w-3xl bg-[#141820]/95 border border-white/15 rounded-xl p-6 sm:p-8 shadow-2xl">
+            <div className="flex flex-row items-center justify-between pb-5 border-b border-white/15">
               <div>
-                <h1 className="font-display text-3xl sm:text-5xl md:text-6xl font-bold tracking-tight text-white">
+                <h1 className="font-display text-3xl sm:text-5xl font-bold tracking-tight text-white">
                   Shatterdepth
                 </h1>
-                <p className="mt-1.5 text-xs sm:text-sm md:text-base text-zinc-300 max-w-xl leading-relaxed">
-                  A 2D side-scrolling platforming roguelite where every stone, brick wall, wooden beam,
-                  barrel, and decoration is physically simulated per pixel. Sever structural supports to
-                  collapse entire wall segments onto enemies below.
+                <p className="mt-1 text-xs sm:text-sm text-zinc-400">
+                  Select a save slot or configure game settings before entering the subterranean hub bastion.
                 </p>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {!isStandalone && (isInstallable || isIOS) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isInstallable) {
-                        void installApp();
-                      } else {
-                        setShowIOSInstallGuide(true);
-                      }
-                    }}
-                    className="min-h-[42px] flex items-center gap-2 px-3.5 py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs font-medium text-amber-200 hover:bg-amber-500/20 transition-colors whitespace-nowrap shrink-0"
-                  >
-                    <Download className="w-4 h-4" />
-                    Install App
-                  </button>
-                )}
-                {!isStandalone && !isIOS && (
-                  <button
-                    type="button"
-                    onClick={toggleFullscreen}
-                    className="min-h-[42px] flex items-center gap-2 px-3.5 py-2 rounded-lg border border-white/10 text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/5 transition-colors whitespace-nowrap shrink-0"
-                  >
-                    {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                    {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-                  </button>
-                )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowStartSettings(!showStartSettings)}
+                  className="min-h-[40px] px-3.5 py-2 rounded-lg border border-white/15 text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/5 transition-colors whitespace-nowrap"
+                >
+                  {showStartSettings ? 'Save Slots' : 'Settings'}
+                </button>
                 <button
                   type="button"
                   onClick={handleToggleMute}
-                  className="min-h-[42px] flex items-center gap-2 px-3.5 py-2 rounded-lg border border-white/10 text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/5 transition-colors whitespace-nowrap shrink-0"
+                  className="min-h-[40px] px-3.5 py-2 rounded-lg border border-white/15 text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/5 transition-colors whitespace-nowrap"
                 >
                   {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                  {muted ? 'Audio Off' : 'Audio On'}
                 </button>
               </div>
             </div>
 
-            {/* Class Selector */}
-            <div className="mt-4 sm:mt-5">
-              <h2 className="text-xs font-semibold text-zinc-400 tracking-wide mb-2">
-                Select Loadout
-              </h2>
-              <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
-                {(Object.keys(CLASSES) as ClassId[]).map((cid) => {
-                  const cls = CLASSES[cid];
-                  const active = selectedClass === cid;
-                  return (
+            {showStartSettings ? (
+              <div className="mt-6 space-y-4">
+                <h2 className="text-sm font-semibold text-amber-400 uppercase tracking-wide">Game Settings</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="bg-[#0C0E12] border border-white/10 rounded-lg p-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-white">Audio Sound FX & Music</div>
+                      <div className="text-xs text-zinc-400">Toggle game sound effects and guitar BGM</div>
+                    </div>
                     <button
-                      key={cid}
                       type="button"
-                      onClick={() => setSelectedClass(cid)}
-                      className={`text-left p-3 sm:p-4 rounded-lg border transition-colors focus-visible:outline-2 focus-visible:outline-amber-400 ${
-                        active ? 'text-white' : 'bg-[#0C0E12]/60 border-white/10 text-zinc-300 hover:border-white/25'
-                      }`}
-                      style={
-                        active
-                          ? {
-                              backgroundColor: activePalette.accentGlow,
-                              borderColor: activePalette.accentHex,
-                            }
-                          : undefined
-                      }
+                      onClick={handleToggleMute}
+                      className="px-3 py-1.5 rounded bg-zinc-800 text-xs text-white hover:bg-zinc-700"
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                        <span className="font-semibold text-xs sm:text-sm text-white">{cls.name}</span>
-                        <span className="font-mono-tabular text-[11px] sm:text-xs text-zinc-400">
-                          {cls.maxHp} HP · {cls.maxBombs} Bombs
-                        </span>
-                      </div>
-                      <p className="mt-1 text-[11px] sm:text-xs text-zinc-400 leading-relaxed line-clamp-2 sm:line-clamp-none">
-                        {cls.summary}
-                      </p>
+                      {muted ? 'Muted' : 'Active'}
                     </button>
-                  );
-                })}
+                  </div>
+                  <div className="bg-[#0C0E12] border border-white/10 rounded-lg p-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-white">Fullscreen Mode</div>
+                      <div className="text-xs text-zinc-400">Expand canvas to immersive screen</div>
+                    </div>
+                    {!isStandalone && !isIOS && (
+                      <button
+                        type="button"
+                        onClick={toggleFullscreen}
+                        className="px-3 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-xs"
+                      >
+                        {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="pt-4 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowStartSettings(false)}
+                    className="px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm"
+                  >
+                    Back to Save Slots
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="mt-6 space-y-4">
+                <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Save Slots</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[1, 2, 3].map((slotId) => {
+                    const slotMeta = loadSlotMeta(slotId);
+                    const isSelected = activeSlot === slotId;
+                    const hasProgress = slotMeta.runsCompleted > 0 || slotMeta.persistentGold > 0 || slotMeta.bestDepth > 0;
+                    return (
+                      <div
+                        key={slotId}
+                        className={`p-4 rounded-xl border flex flex-col justify-between gap-4 transition-colors ${
+                          isSelected ? 'bg-amber-500/10 border-amber-500' : 'bg-[#0C0E12]/70 border-white/10 hover:border-white/30'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <span className="font-display font-bold text-white text-base">Slot {slotId}</span>
+                            {isSelected && <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-amber-500 text-zinc-950">Active</span>}
+                          </div>
+                          {hasProgress ? (
+                            <div className="mt-3 space-y-1 text-xs text-zinc-300 font-mono-tabular">
+                              <div>Gold: <span className="text-amber-300">{slotMeta.persistentGold}</span></div>
+                              <div>Best Depth: <span className="text-white">{slotMeta.bestDepth}</span></div>
+                              <div>Runs: <span className="text-white">{slotMeta.runsCompleted}</span></div>
+                            </div>
+                          ) : (
+                            <p className="mt-3 text-xs text-zinc-500 italic">Empty save slot</p>
+                          )}
+                        </div>
 
-            {/* Seed & Controls */}
-            <div className="mt-4 sm:mt-5 pt-4 sm:pt-5 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 items-end">
+                        <div className="flex items-center gap-2 pt-2 border-t border-white/10">
+                          <button
+                            type="button"
+                            onClick={() => handleEnterHubFromStart(slotId)}
+                            className="flex-1 min-h-[38px] px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-xs transition-colors text-center"
+                          >
+                            {hasProgress ? 'Load Save' : 'New Game'}
+                          </button>
+                          {hasProgress && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Delete save slot ${slotId}? This cannot be undone.`)) {
+                                  handleDeleteSlot(slotId);
+                                }
+                              }}
+                              className="min-h-[38px] px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-300 hover:bg-rose-500/20 text-xs font-medium transition-colors"
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Vault Upgrades Modal */}
+      {gameState === 'HUB_WORLD' && activeHubModal === 'VAULT' && !isPortrait && (
+        <div className="fixed inset-0 z-30 bg-black/80 flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-[#141820] border border-white/15 rounded-xl p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-white/10">
+              <h2 className="font-display text-2xl font-bold text-white flex items-center gap-3">
+                <span>Vault Upgrades</span>
+                <span className="text-xs font-mono-tabular px-2.5 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300">
+                  🪙 {meta.persistentGold} Gold
+                </span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => setActiveHubModal('NONE')}
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg bg-white/10 text-zinc-300 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="mt-4 space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+              {/* Titan Plating */}
+              {(() => {
+                const cost = (meta.maxHpLevel + 1) * 60;
+                const canBuy = meta.persistentGold >= cost;
+                return (
+                  <div className="bg-[#0C0E12] border border-white/10 rounded-lg p-3.5 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-white">Titan Plating</div>
+                      <div className="text-xs text-zinc-400">Rank {meta.maxHpLevel} · +{meta.maxHpLevel * 25} Max HP</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!canBuy}
+                      onClick={() => handleBuyUpgrade('maxHpLevel', cost)}
+                      className={`min-h-[36px] px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                        canBuy ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                      }`}
+                    >
+                      Upgrade ({cost} 🪙)
+                    </button>
+                  </div>
+                );
+              })()}
+              {/* Demo Reserves */}
+              {(() => {
+                const cost = (meta.startBombsLevel + 1) * 120;
+                const canBuy = meta.persistentGold >= cost;
+                return (
+                  <div className="bg-[#0C0E12] border border-white/10 rounded-lg p-3.5 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-white">Demo Reserves</div>
+                      <div className="text-xs text-zinc-400">Rank {meta.startBombsLevel} · +{meta.startBombsLevel} Start Bombs</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!canBuy}
+                      onClick={() => handleBuyUpgrade('startBombsLevel', cost)}
+                      className={`min-h-[36px] px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                        canBuy ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                      }`}
+                    >
+                      Upgrade ({cost} 🪙)
+                    </button>
+                  </div>
+                );
+              })()}
+              {/* Overclocked Core */}
+              {(() => {
+                const cost = (meta.damageLevel + 1) * 75;
+                const canBuy = meta.persistentGold >= cost;
+                return (
+                  <div className="bg-[#0C0E12] border border-white/10 rounded-lg p-3.5 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-white">Overclocked Core</div>
+                      <div className="text-xs text-zinc-400">Rank {meta.damageLevel} · +{meta.damageLevel * 6}% Weapon Dmg</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!canBuy}
+                      onClick={() => handleBuyUpgrade('damageLevel', cost)}
+                      className={`min-h-[36px] px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                        canBuy ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                      }`}
+                    >
+                      Upgrade ({cost} 🪙)
+                    </button>
+                  </div>
+                );
+              })()}
+              {/* Servo Thrusters */}
+              {(() => {
+                const cost = (meta.speedLevel + 1) * 70;
+                const canBuy = meta.persistentGold >= cost;
+                return (
+                  <div className="bg-[#0C0E12] border border-white/10 rounded-lg p-3.5 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-white">Servo Thrusters</div>
+                      <div className="text-xs text-zinc-400">Rank {meta.speedLevel} · +{meta.speedLevel * 5}% Speed</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!canBuy}
+                      onClick={() => handleBuyUpgrade('speedLevel', cost)}
+                      className={`min-h-[36px] px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                        canBuy ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                      }`}
+                    >
+                      Upgrade ({cost} 🪙)
+                    </button>
+                  </div>
+                );
+              })()}
+              {/* Composite Weave */}
+              {(() => {
+                const cost = (meta.armorLevel + 1) * 90;
+                const canBuy = meta.persistentGold >= cost;
+                return (
+                  <div className="bg-[#0C0E12] border border-white/10 rounded-lg p-3.5 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-white">Composite Weave</div>
+                      <div className="text-xs text-zinc-400">Rank {meta.armorLevel} · -{meta.armorLevel * 4}% Dmg Taken</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!canBuy}
+                      onClick={() => handleBuyUpgrade('armorLevel', cost)}
+                      className={`min-h-[36px] px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                        canBuy ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                      }`}
+                    >
+                      Upgrade ({cost} 🪙)
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Expedition Staging Modal */}
+      {gameState === 'HUB_WORLD' && activeHubModal === 'EXPEDITION' && !isPortrait && (
+        <div className="fixed inset-0 z-30 bg-black/80 flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-[#141820] border border-white/15 rounded-xl p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-white/10">
+              <h2 className="font-display text-2xl font-bold text-white">Expedition Portal Staging</h2>
+              <button
+                type="button"
+                onClick={() => setActiveHubModal('NONE')}
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg bg-white/10 text-zinc-300 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="mt-4 space-y-4">
+              <div>
+                <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Select Loadout Class</h3>
+                <div className="grid grid-cols-3 gap-2.5">
+                  {(Object.keys(CLASSES) as ClassId[]).map((cid) => {
+                    const cls = CLASSES[cid];
+                    const active = selectedClass === cid;
+                    return (
+                      <button
+                        key={cid}
+                        type="button"
+                        onClick={() => setSelectedClass(cid)}
+                        className={`text-left p-3 rounded-lg border transition-colors ${
+                          active ? 'bg-amber-500/20 border-amber-500 text-white' : 'bg-[#0C0E12] border-white/10 text-zinc-300'
+                        }`}
+                      >
+                        <div className="font-semibold text-xs sm:text-sm text-white">{cls.name}</div>
+                        <div className="text-[11px] text-zinc-400 mt-1">{cls.maxHp + meta.maxHpLevel * 25} HP</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div>
                 <label htmlFor="world-seed" className="block text-xs font-semibold text-zinc-400 mb-1.5">
                   Procedural World Seed
@@ -944,44 +1297,45 @@ export default function App() {
                     inputMode="numeric"
                     value={seedInput}
                     onChange={(e) => setSeedInput(e.target.value)}
-                    className="w-32 sm:w-40 min-h-[40px] bg-[#0C0E12] border border-white/15 rounded-lg px-3 py-1.5 text-sm font-mono-tabular text-white focus:outline-none focus:border-amber-500"
+                    className="w-40 min-h-[40px] bg-[#0C0E12] border border-white/15 rounded-lg px-3 py-1.5 text-sm font-mono-tabular text-white focus:outline-none focus:border-amber-500"
                   />
                   <button
                     type="button"
                     onClick={handleRandomizeSeed}
-                    className="min-h-[40px] flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/15 text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/5 transition-colors whitespace-nowrap shrink-0"
+                    className="min-h-[40px] flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/15 text-xs font-medium text-zinc-300 hover:bg-white/5"
                   >
                     <Shuffle className="w-3.5 h-3.5" />
                     New Seed
                   </button>
                 </div>
-                <p className="mt-2 text-[11px] sm:text-xs text-zinc-400 leading-relaxed">
-                  {isTouchMode
-                    ? 'Left stick: Move & push up to jump · Right stick: Aim & fire · Quick buttons: Weapon, Bomb, Dash'
-                    : 'Move: A / D · Jump: Space / W · Dash: Shift · Aim & Fire: Left Click · Bomb: Right Click / E · Switch Weapon: 1–3 / Scroll · Interact: F'}
-                </p>
-              </div>
-
-              <div className="flex flex-row justify-end items-center gap-3">
-                {meta.bestDepth > 0 && (
-                  <div className="text-xs text-zinc-400 font-mono-tabular hidden sm:block">
-                    Best Depth {meta.bestDepth} · {meta.totalCollapses} Collapses
+                {previousSeed && (
+                  <div className="mt-1.5 flex items-center gap-2 text-xs text-zinc-400">
+                    <span>Previous: <strong className="font-mono-tabular text-zinc-300">{previousSeed}</strong></span>
+                    <button
+                      type="button"
+                      onClick={() => setSeedInput(previousSeed)}
+                      className="text-amber-400 hover:text-amber-300 underline font-mono-tabular"
+                    >
+                      Reuse Seed
+                    </button>
                   </div>
                 )}
+              </div>
+
+              <div className="pt-2 flex items-center gap-3">
                 <button
                   type="button"
                   onClick={handleStartBossRun}
-                  className="min-h-[46px] px-4 py-2.5 rounded-lg border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 font-semibold text-xs sm:text-sm transition-colors whitespace-nowrap shrink-0"
+                  className="min-h-[44px] flex-1 px-4 py-2.5 rounded-lg border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 font-semibold text-xs transition-colors"
                 >
                   Jump to Boss (Depth 10)
                 </button>
                 <button
                   type="button"
                   onClick={handleStartRun}
-                  className="min-h-[46px] px-6 py-2.5 rounded-lg text-zinc-950 font-semibold text-sm transition-opacity hover:opacity-90 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-white"
-                  style={{ backgroundColor: activePalette.accentHex }}
+                  className="min-h-[44px] flex-1 px-6 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-opacity"
                 >
-                  Start Run
+                  Embark Expedition
                 </button>
               </div>
             </div>
@@ -1043,10 +1397,10 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={handleReturnTitle}
+                onClick={handleReturnHub}
                 className="min-h-[44px] px-4 py-2.5 rounded-lg border border-white/15 text-sm font-medium text-zinc-300 hover:text-white hover:bg-white/5 transition-colors whitespace-nowrap"
               >
-                Quit Run
+                Quit to Hub
               </button>
             </div>
           </div>
@@ -1205,10 +1559,10 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={handleReturnTitle}
+                onClick={handleReturnHub}
                 className="min-h-[44px] px-4 py-2.5 rounded-lg border border-white/15 text-sm font-medium text-zinc-300 hover:text-white hover:bg-white/5 transition-colors whitespace-nowrap"
               >
-                Title Menu
+                Return to Hub
               </button>
             </div>
           </div>
@@ -1269,14 +1623,22 @@ export default function App() {
         <div className="fixed inset-0 z-50 bg-[#0C0E12]/95 flex items-center justify-center p-6 text-center">
           <div className="max-w-xs bg-[#141820] border border-white/10 rounded-xl p-6 flex flex-col items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400">
-              <RotateCw className="w-6 h-6" />
+              <RotateCw className="w-6 h-6 animate-spin-slow" />
             </div>
             <div>
               <h2 className="font-display text-2xl font-bold text-white">Rotate to Landscape</h2>
               <p className="mt-1.5 text-sm text-zinc-400 leading-relaxed">
-                Shatterdepth plays in landscape mode. Rotate your screen horizontally to continue.
+                Shatterdepth plays in landscape mode. Rotate your screen horizontally or tap auto-rotate below.
               </p>
             </div>
+            <button
+              type="button"
+              onClick={tryAutoRotate}
+              className="w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-xs transition-colors flex items-center justify-center gap-2"
+            >
+              <RotateCw className="w-4 h-4" />
+              Auto-Rotate / Landscape
+            </button>
           </div>
         </div>
       )}

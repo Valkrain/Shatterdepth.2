@@ -7,13 +7,14 @@ import {
   DynamicParticle,
   MAT_PROPS,
   Mat,
+  ParticleVisualKind,
   WORLD_H,
   WORLD_W,
 } from './types';
-import { packColor, tintColor, unpackColor } from './prng';
+import { IS_LITTLE_ENDIAN, packColor, tintColor, unpackColor } from './prng';
 import { sfx } from './SoundFX';
 
-const MAX_PARTICLES = 2600;
+const MAX_PARTICLES = 5000;
 const GRAVITY = 280; // sim-pixels / s^2
 
 export interface BlastEvent {
@@ -78,15 +79,18 @@ export class PixelWorld {
   pixelsDestroyedCount = 0;
   segmentsCollapsedCount = 0;
   private stepParity = 0;
+  private renderTick = 0;
   private pendingBarrelExplosions: Array<{ x: number; y: number }> = [];
   private pendingCrushHits: CrushHit[] = [];
   private pendingGoldDrops: Array<{ x: number; y: number }> = [];
+  transparentEmpty = false;
+  protectChains = false;
 
   constructor() {
     this.offscreen = document.createElement('canvas');
     this.offscreen.width = WORLD_W;
     this.offscreen.height = WORLD_H;
-    const ctx = this.offscreen.getContext('2d', { alpha: false });
+    const ctx = this.offscreen.getContext('2d', { alpha: true });
     if (!ctx) throw new Error('Failed to create offscreen 2D context');
     this.offCtx = ctx;
     this.offCtx.imageSmoothingEnabled = false;
@@ -98,6 +102,8 @@ export class PixelWorld {
         active: false,
         x: 0,
         y: 0,
+        prevX: 0,
+        prevY: 0,
         vx: 0,
         vy: 0,
         mat: Mat.EMPTY,
@@ -105,13 +111,22 @@ export class PixelWorld {
         life: 0,
         maxLife: 1,
         bounces: 0,
+        size: 1,
+        kind: 'DEBRIS',
         settleOnRest: true,
         igniteOnHit: false,
       });
     }
   }
 
-  clear(skyTop: [number, number, number], skyBottom: [number, number, number]): void {
+  clear(
+    skyTop: [number, number, number],
+    skyBottom: [number, number, number],
+    transparentEmpty = false,
+    protectChains = false
+  ): void {
+    this.transparentEmpty = transparentEmpty;
+    this.protectChains = protectChains;
     this.mat.fill(Mat.EMPTY);
     this.meta.fill(0);
     this.pixelDmg.fill(0);
@@ -125,6 +140,12 @@ export class PixelWorld {
     this.pendingGoldDrops.length = 0;
     for (let i = 0; i < MAX_PARTICLES; i++) {
       this.particles[i].active = false;
+    }
+
+    if (transparentEmpty) {
+      this.bgColor.fill(0);
+      this.color.fill(0);
+      return;
     }
 
     for (let y = 0; y < WORLD_H; y++) {
@@ -198,13 +219,17 @@ export class PixelWorld {
     col: number,
     life = 2.5,
     settleOnRest = true,
-    igniteOnHit = false
+    igniteOnHit = false,
+    size = 1,
+    kind?: ParticleVisualKind
   ): void {
     const p = this.particles[this.particleCursor];
     this.particleCursor = (this.particleCursor + 1) % MAX_PARTICLES;
     p.active = true;
     p.x = x;
     p.y = y;
+    p.prevX = x;
+    p.prevY = y;
     p.vx = vx;
     p.vy = vy;
     p.mat = mat;
@@ -212,6 +237,9 @@ export class PixelWorld {
     p.life = life;
     p.maxLife = life;
     p.bounces = 0;
+    p.size = size;
+    p.kind =
+      kind ?? (mat === Mat.SMOKE ? 'DUST' : mat === Mat.EMBER ? 'SPARK' : 'DEBRIS');
     p.settleOnRest = settleOnRest;
     p.igniteOnHit = igniteOnHit;
   }
@@ -233,6 +261,7 @@ export class PixelWorld {
     let destroyed = 0;
     let chipped = 0;
     let resisted = 0;
+    let brokeChain = false;
 
     for (let dy = -r; dy <= r; dy++) {
       const y = icy + dy;
@@ -253,9 +282,17 @@ export class PixelWorld {
           }
           continue;
         }
+        const distRatio = Math.sqrt(dist2) / Math.max(1, radius);
+        if (m === Mat.LAVA && damageType === 'CRYOGENIC' && distRatio < 0.85) {
+          this.setPixel(x, y, Mat.STONE, packColor(52, 44, 48));
+          continue;
+        }
 
         const props = MAT_PROPS[m];
-        const distRatio = Math.sqrt(dist2) / Math.max(1, radius);
+
+        if (this.protectChains && m === Mat.CHAIN) {
+          continue;
+        }
 
         if (props.hardness >= 255) {
           if (distRatio < 0.45 && Math.random() < 0.14) {
@@ -301,6 +338,9 @@ export class PixelWorld {
           this.pixelDmg[idx] = 0;
           this.markDirty(x, y);
           destroyed++;
+          if (m === Mat.CHAIN) {
+            brokeChain = true;
+          }
 
           if ((m === Mat.GOLD || m === Mat.JAR) && Math.random() < 0.25) {
             this.pendingGoldDrops.push({ x, y });
@@ -355,10 +395,10 @@ export class PixelWorld {
             this.setPixel(x, y, Mat.ACID, packColor(72, 238, 98), 0);
           }
 
-          // Convert into flying ballistic pixel particle
-          if (props.solid && Math.random() < (radius > 7 ? 0.45 : 0.75)) {
+          // Convert into flying ballistic pixel particle + chunky debris & dust puffs
+          if (props.solid && Math.random() < (radius > 7 ? 0.52 : 0.78)) {
             const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.9;
-            const speed = (65 + Math.random() * 140) * (1.15 - distRatio * 0.5);
+            const speed = (65 + Math.random() * 145) * (1.15 - distRatio * 0.45);
             const debrisMat =
               m === Mat.BRICK || m === Mat.STONE || m === Mat.METAL
                 ? Mat.RUBBLE
@@ -369,23 +409,42 @@ export class PixelWorld {
                 : m;
             const pCol =
               debrisMat === Mat.EMBER && (ignite || damageType === 'THERMAL' || damageType === 'PLASMA')
-                ? packColor(255, 160, 40)
+                ? packColor(255, 175, 50)
                 : damageType === 'CORROSIVE'
                 ? packColor(100, 235, 110)
                 : damageType === 'ARC'
                 ? packColor(180, 248, 255)
                 : oldCol;
+            const chunkSize =
+              debrisMat === Mat.RUBBLE && Math.random() < 0.34 ? 2 : 1;
             this.spawnParticle(
               x + 0.5,
               y + 0.5,
               Math.cos(angle) * speed,
-              Math.sin(angle) * speed - 40,
+              Math.sin(angle) * speed - 42,
               debrisMat,
               pCol,
               1.6 + Math.random() * 1.4,
               debrisMat !== Mat.EMBER && damageType !== 'CORROSIVE',
-              ignite || damageType === 'THERMAL'
+              ignite || damageType === 'THERMAL',
+              chunkSize
             );
+            // Emit expanding dust cloud puff on masonry/dirt blasts
+            if (Math.random() < 0.22 && (m === Mat.BRICK || m === Mat.STONE || m === Mat.DIRT)) {
+              this.spawnParticle(
+                x + 0.5,
+                y + 0.5,
+                Math.cos(angle) * speed * 0.28 + (Math.random() - 0.5) * 20,
+                Math.sin(angle) * speed * 0.28 - 18,
+                Mat.SMOKE,
+                tintColor(oldCol, 1.15),
+                0.55 + Math.random() * 0.45,
+                false,
+                false,
+                radius >= 8 ? 3 : 2,
+                'DUST'
+              );
+            }
           } else if (m === Mat.OIL && (ignite || damageType === 'THERMAL' || damageType === 'PLASMA')) {
             this.setPixel(x, y, Mat.FIRE, packColor(255, 165, 35), 40);
           } else if ((ignite || damageType === 'THERMAL') && props.flammable && Math.random() < 0.55) {
@@ -399,7 +458,10 @@ export class PixelWorld {
               Mat.EMBER,
               packColor(255, 225, 130),
               0.45,
-              false
+              false,
+              false,
+              1,
+              'SPARK'
             );
           }
         } else {
@@ -449,7 +511,7 @@ export class PixelWorld {
       if (destroyed <= 12) {
         sfx.playChip();
       }
-      if (checkStructure && destroyed >= 4) {
+      if (checkStructure && (destroyed >= 4 || brokeChain)) {
         this.queueStructuralCheck(icx, icy);
       }
     } else if (chipped > 0 || resisted > 0) {
@@ -485,6 +547,7 @@ export class PixelWorld {
 
   private isStructuralSolid(m: Mat): boolean {
     if (m === Mat.EMPTY || m === Mat.SAND || m === Mat.RUBBLE || m === Mat.ASH) return false;
+    if (m === Mat.CHAIN) return true;
     const p = MAT_PROPS[m];
     return p.solid;
   }
@@ -719,6 +782,67 @@ export class PixelWorld {
     this.bodyCanvases.set(body.id, c);
   }
 
+  spawnDetachedChunk(
+    worldX: number,
+    worldY: number,
+    w: number,
+    h: number,
+    cx: number,
+    cy: number,
+    mats: Uint8Array,
+    colors: Uint32Array,
+    pixelCount: number,
+    vx: number,
+    vy: number,
+    angularVel: number
+  ): void {
+    if (this.bodies.length < 28 && pixelCount >= 12) {
+      const body: CrumblingBody = {
+        id: this.bodyIdCounter++,
+        x: worldX,
+        y: worldY,
+        vx,
+        vy,
+        angle: 0,
+        angularVel,
+        w,
+        h,
+        cx,
+        cy,
+        mats,
+        colors,
+        pixelCount,
+        age: 0,
+        settledFrames: 0,
+        hasCrushedOnce: false,
+      };
+      this.createBodyCanvas(body);
+      this.bodies.push(body);
+      this.segmentsCollapsedCount++;
+      return;
+    }
+
+    for (let ly = 0; ly < h; ly++) {
+      for (let lx = 0; lx < w; lx++) {
+        const bi = ly * w + lx;
+        const m = mats[bi] as Mat;
+        if (m === Mat.EMPTY) continue;
+        if (Math.random() < 0.65) {
+          this.spawnParticle(
+            worldX + (lx - cx),
+            worldY + (ly - cy),
+            vx + (Math.random() - 0.5) * 90,
+            vy - 20 - Math.random() * 65,
+            m === Mat.BRICK || m === Mat.STONE || m === Mat.METAL ? Mat.RUBBLE : m,
+            colors[bi],
+            1.8,
+            m !== Mat.CRYSTAL
+          );
+        }
+      }
+    }
+  }
+
   private shatterBody(body: CrumblingBody, impactSpeed: number): void {
     this.bodyCanvases.delete(body.id);
     const cos = Math.cos(body.angle);
@@ -846,8 +970,24 @@ export class PixelWorld {
       return;
     }
 
-    // Final shatter/settle into rubble + flying pixels!
+    // Final shatter/settle into rubble + flying pixels + billowing dust clouds!
     let settled = 0;
+    for (let d = 0; d < Math.min(28, Math.round(body.pixelCount * 0.24)); d++) {
+      this.spawnParticle(
+        body.x + (Math.random() - 0.5) * body.w,
+        body.y + (Math.random() - 0.5) * body.h,
+        (Math.random() - 0.5) * 75,
+        -25 - Math.random() * 45,
+        Mat.SMOKE,
+        packColor(175, 180, 190, 175),
+        1.1 + Math.random() * 1.1,
+        false,
+        false,
+        Math.random() < 0.45 ? 4 : 3,
+        'DUST'
+      );
+    }
+
     for (let ly = 0; ly < body.h; ly++) {
       for (let lx = 0; lx < body.w; lx++) {
         const bi = ly * body.w + lx;
@@ -865,16 +1005,19 @@ export class PixelWorld {
           continue;
         }
 
-        if (Math.random() < 0.35 && impactSpeed > 35) {
+        if (Math.random() < 0.38 && impactSpeed > 32) {
           this.spawnParticle(
             wx,
             wy,
-            (Math.random() - 0.5) * 85,
-            -25 - Math.random() * 55,
+            (Math.random() - 0.5) * 90,
+            -28 - Math.random() * 60,
             m === Mat.BRICK || m === Mat.STONE ? Mat.RUBBLE : m,
             col,
-            2.0,
-            true
+            2.1,
+            true,
+            false,
+            Math.random() < 0.3 ? 2 : 1,
+            'DEBRIS'
           );
         } else if (this.inBounds(wx, wy) && !this.isSolid(wx, wy)) {
           const settledMat =
@@ -1006,7 +1149,23 @@ export class PixelWorld {
         continue;
       }
 
-      p.vy += GRAVITY * dt;
+      p.prevX = p.x;
+      p.prevY = p.y;
+
+      if (p.kind === 'DUST') {
+        p.vy -= 14 * dt; // Gentle billowing lift
+        const drag = Math.pow(0.18, dt);
+        p.vx *= drag;
+        p.vy *= drag;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        if (p.x <= 1 || p.x >= WORLD_W - 2 || p.y <= 1 || p.y >= WORLD_H - 3) {
+          p.active = false;
+        }
+        continue;
+      }
+
+      p.vy += (p.kind === 'SPARK' ? GRAVITY * 0.58 : GRAVITY) * dt;
       p.vx *= 0.992;
 
       const nx = p.x + p.vx * dt;
@@ -1092,7 +1251,7 @@ export class PixelWorld {
 
             if (m === Mat.SAND || m === Mat.RUBBLE || m === Mat.ASH || m === Mat.EMBER) {
               this.stepPowder(x, y, idx, m);
-            } else if (m === Mat.WATER || m === Mat.OIL || m === Mat.ACID) {
+            } else if (m === Mat.WATER || m === Mat.OIL || m === Mat.ACID || m === Mat.LAVA) {
               this.stepLiquid(x, y, idx, m);
             } else if (m === Mat.FIRE) {
               this.stepFire(x, y, idx);
@@ -1223,19 +1382,75 @@ export class PixelWorld {
       }
     }
 
-    // Water extinguishes fire
+    // Lava: ignites flammables, turns into basalt stone + steam on contact with water, flows sluggishly
+    if (m === Mat.LAVA) {
+      this.markDirty(x, y);
+      const dirs = [WORLD_W, -1, 1, -WORLD_W];
+      const off = dirs[(Math.random() * 4) | 0];
+      const ni = idx + off;
+      const nm = this.mat[ni] as Mat;
+      if (nm === Mat.WATER) {
+        this.mat[idx] = Mat.STONE;
+        this.color[idx] = packColor(46, 42, 48);
+        this.meta[idx] = 0;
+        this.mat[ni] = Mat.SMOKE;
+        this.color[ni] = packColor(200, 206, 215, 155);
+        this.meta[ni] = 20;
+        return;
+      }
+      if (MAT_PROPS[nm].flammable && Math.random() < 0.16) {
+        if (nm === Mat.BARREL) {
+          this.pendingBarrelExplosions.push({ x, y });
+          this.mat[ni] = Mat.EMPTY;
+          this.color[ni] = 0;
+          this.pixelDmg[ni] = 0;
+        } else {
+          this.mat[ni] = Mat.FIRE;
+          this.color[ni] = packColor(255, 155, 35);
+          this.meta[ni] = nm === Mat.OIL ? 42 : 30;
+        }
+      }
+      // Occasional bubbling surface spark above open lava
+      if (this.mat[idx - WORLD_W] === Mat.EMPTY && Math.random() < 0.005) {
+        this.spawnParticle(
+          x + 0.5,
+          y - 0.5,
+          (Math.random() - 0.5) * 26,
+          -34 - Math.random() * 28,
+          Mat.EMBER,
+          packColor(255, 195, 65),
+          0.36,
+          false,
+          false,
+          1,
+          'SPARK'
+        );
+      }
+      // Viscous: only advance flow 58% of ticks
+      if (Math.random() > 0.58) return;
+    }
+
+    // Water extinguishes fire & cools lava surface
     if (m === Mat.WATER) {
       const below = idx + WORLD_W;
       if (this.mat[below] === Mat.FIRE) {
         this.mat[below] = Mat.SMOKE;
         this.color[below] = packColor(190, 200, 210, 140);
         this.meta[below] = 18;
+      } else if (this.mat[below] === Mat.LAVA) {
+        this.mat[below] = Mat.STONE;
+        this.color[below] = packColor(48, 44, 50);
+        this.mat[idx] = Mat.SMOKE;
+        this.color[idx] = packColor(200, 206, 215, 155);
+        this.meta[idx] = 20;
+        this.markDirty(x, y);
+        return;
       }
     }
 
     const below = idx + WORLD_W;
     const bm = this.mat[below] as Mat;
-    if (bm === Mat.EMPTY || bm === Mat.SMOKE || (m === Mat.WATER && bm === Mat.OIL)) {
+    if (bm === Mat.EMPTY || bm === Mat.SMOKE || (m === Mat.WATER && bm === Mat.OIL) || (m === Mat.LAVA && (bm === Mat.OIL || bm === Mat.FIRE))) {
       this.swap(idx, x, y, below, x, y + 1);
       return;
     }
@@ -1247,8 +1462,9 @@ export class PixelWorld {
       return;
     }
 
-    // Lateral dispersion (up to 3 pixels for snappy fluid leveling)
-    for (let step = 1; step <= 3; step++) {
+    // Lateral dispersion (up to 3 pixels for snappy fluid leveling, 1-2 for thick lava)
+    const maxStep = m === Mat.LAVA ? 1 : 3;
+    for (let step = 1; step <= maxStep; step++) {
       const nx = x + dir * step;
       if (nx <= 1 || nx >= WORLD_W - 2) break;
       const sideIdx = y * WORLD_W + nx;
@@ -1336,59 +1552,252 @@ export class PixelWorld {
     }
   }
 
-  renderToOffscreen(): void {
-    // Blit background where foreground is EMPTY, else foreground color
+  renderToOffscreen(viewX = 0, viewY = 0, viewW = WORLD_W, viewH = WORLD_H): void {
+    this.renderTick = (this.renderTick + 1) | 0;
+    const tick = this.renderTick;
     const u32 = this.imgU32;
     const mats = this.mat;
     const fg = this.color;
     const bg = this.bgColor;
     const dmgArr = this.pixelDmg;
     const total = this.size;
+    const rowStride = WORLD_W;
 
-    for (let i = 0; i < total; i++) {
-      const m = mats[i];
-      if (m === Mat.EMPTY) {
-        u32[i] = bg[i];
-      } else if (m === Mat.SMOKE) {
-        // Blend smoke lightly over background
-        const [sr, sg, sb] = unpackColor(fg[i]);
-        const [br, bgc, bb] = unpackColor(bg[i]);
-        u32[i] = packColor((sr + br) >> 1, (sg + bgc) >> 1, (sb + bb) >> 1, 255);
-      } else {
+    const x0 = Math.max(0, Math.floor(viewX) - 4);
+    const y0 = Math.max(0, Math.floor(viewY) - 4);
+    const x1 = Math.min(WORLD_W - 1, Math.ceil(viewX + viewW) + 4);
+    const y1 = Math.min(WORLD_H - 1, Math.ceil(viewY + viewH) + 4);
+
+    for (let y = y0; y <= y1; y++) {
+      const rowOffset = y * rowStride;
+      for (let x = x0; x <= x1; x++) {
+        const i = rowOffset + x;
+        const m = mats[i];
+        if (m === Mat.EMPTY) {
+          u32[i] = bg[i];
+          continue;
+        }
+
+        if (m === Mat.SMOKE) {
+          const fc = fg[i];
+          const bc = bg[i];
+          if (this.transparentEmpty && bc === 0) {
+            if (IS_LITTLE_ENDIAN) {
+              u32[i] = (140 << 24) | (fc & 0x00ffffff);
+            } else {
+              const [sr, sg, sb] = unpackColor(fc);
+              u32[i] = packColor(sr, sg, sb, 140);
+            }
+          } else if (IS_LITTLE_ENDIAN) {
+            const r = (((fc & 0xff) + (bc & 0xff)) >> 1);
+            const g = ((((fc >>> 8) & 0xff) + ((bc >>> 8) & 0xff)) >> 1);
+            const b = ((((fc >>> 16) & 0xff) + ((bc >>> 16) & 0xff)) >> 1);
+            u32[i] = (0xff << 24) | (b << 16) | (g << 8) | r;
+          } else {
+            const [sr, sg, sb] = unpackColor(fc);
+            const [br, bgc, bb] = unpackColor(bc);
+            u32[i] = packColor((sr + br) >> 1, (sg + bgc) >> 1, (sb + bb) >> 1, 255);
+          }
+          continue;
+        }
+
+        if (m === Mat.WATER || m === Mat.ACID || m === Mat.OIL || m === Mat.LAVA) {
+          const fc = fg[i];
+          const bc = bg[i];
+          const above = i >= rowStride ? mats[i - rowStride] : Mat.EMPTY;
+          const onSurface = above === Mat.EMPTY || above === Mat.SMOKE;
+          if (IS_LITTLE_ENDIAN) {
+            let r = fc & 0xff;
+            let g = (fc >>> 8) & 0xff;
+            let b = (fc >>> 16) & 0xff;
+            const br = bc & 0xff;
+            const bgg = (bc >>> 8) & 0xff;
+            const bb = (bc >>> 16) & 0xff;
+
+            if (m === Mat.WATER) {
+              r = (r * 3 + br) >> 2;
+              g = (g * 3 + bgg) >> 2;
+              b = (b * 3 + bb) >> 2;
+              if (onSurface) {
+                const crest = ((x + (tick >> 2)) & 7) < 2;
+                r = Math.min(255, r + (crest ? 90 : 38));
+                g = Math.min(255, g + (crest ? 105 : 46));
+                b = Math.min(255, b + (crest ? 115 : 54));
+              }
+            } else if (m === Mat.ACID) {
+              if (onSurface) {
+                const bubble = ((x + (tick >> 1)) & 11) < 2;
+                r = Math.min(255, r + (bubble ? 85 : 28));
+                g = Math.min(255, g + (bubble ? 65 : 22));
+                b = Math.min(255, b + (bubble ? 40 : 10));
+              } else if (((i + (tick >> 2)) & 63) === 0) {
+                r = Math.min(255, r + 55);
+                g = Math.min(255, g + 35);
+              }
+            } else if (m === Mat.LAVA) {
+              // Animated swirling magma convection veins & incandescent surface crust
+              const wave = ((x * 3 + y * 5 + (tick >> 1)) & 15);
+              if (onSurface) {
+                r = 255;
+                g = wave < 5 ? 232 : 168;
+                b = wave < 5 ? 96 : 28;
+              } else if (wave < 4) {
+                r = 255;
+                g = Math.min(255, g + 68);
+                b = Math.min(255, b + 28);
+              } else if (wave > 12) {
+                r = Math.max(150, r - 48);
+                g = Math.max(30, g - 52);
+                b = Math.max(8, b - 10);
+              }
+            } else if (onSurface && ((x + (tick >> 3)) & 9) === 0) {
+              // Subtle iridescent oil sheen
+              r = Math.min(255, r + 26);
+              g = Math.min(255, g + 18);
+              b = Math.min(255, b + 36);
+            }
+            u32[i] = (0xff << 24) | (b << 16) | (g << 8) | r;
+          } else {
+            u32[i] = fc;
+          }
+          continue;
+        }
+
         const d = dmgArr[i];
-        if (d === 0) {
-          u32[i] = fg[i];
-        } else {
-          // Progressive fracture / wear shading on damaged pixels
-          const maxHp = MAT_PROPS[m as Mat].maxHp || 16;
+        const c = fg[i];
+
+        // Dynamic edge beveling & overhang ambient occlusion for solid terrain
+        let shadeScale = 256; // 256 = 1.0
+        const props = MAT_PROPS[m as Mat];
+        if (props.solid && m !== Mat.BEDROCK) {
+          const above = i >= rowStride ? mats[i - rowStride] : Mat.BEDROCK;
+          const below = i + rowStride < total ? mats[i + rowStride] : Mat.BEDROCK;
+          const aboveOpen = above === Mat.EMPTY || above === Mat.LAVA || (above >= Mat.WATER && above <= Mat.SMOKE);
+          const belowOpen = below === Mat.EMPTY || below === Mat.LAVA || (below >= Mat.WATER && below <= Mat.SMOKE);
+
+          if (aboveOpen) {
+            shadeScale = 312; // 1.22x top rim highlight
+          } else if (belowOpen) {
+            shadeScale = 176; // 0.69x overhang underside shadow
+          } else {
+            const left = i > 0 ? mats[i - 1] : Mat.BEDROCK;
+            const right = i + 1 < total ? mats[i + 1] : Mat.BEDROCK;
+            const sideOpen =
+              left === Mat.EMPTY ||
+              right === Mat.EMPTY ||
+              left === Mat.LAVA ||
+              right === Mat.LAVA ||
+              (left >= Mat.WATER && left <= Mat.SMOKE) ||
+              (right >= Mat.WATER && right <= Mat.SMOKE);
+            if (sideOpen) {
+              shadeScale = 220; // 0.86x side edge definition
+            } else if (i >= rowStride * 2 && mats[i - rowStride * 2] === Mat.EMPTY) {
+              shadeScale = 276; // 1.08x subtle inner top bevel
+            }
+          }
+
+          // Animated shimmer glints on Crystal & Gold veins
+          if ((m === Mat.CRYSTAL || m === Mat.GOLD) && ((i + (i >> 9) * 3 + (tick >> 2)) & 63) === 0) {
+            shadeScale = 345;
+          }
+        }
+
+        if (d > 0) {
+          const maxHp = props.maxHp || 16;
           const frac = Math.min(1, d / maxHp);
-          const isCrack = frac > 0.4 && ((i ^ (i >> 10)) & 1) === 0;
-          const mul = isCrack ? 0.42 : 1 - frac * 0.42;
-          const c = fg[i];
-          const r = ((c & 0xff) * mul) | 0;
-          const g = (((c >>> 8) & 0xff) * mul) | 0;
-          const b = (((c >>> 16) & 0xff) * mul) | 0;
+          const isCrack = frac > 0.36 && ((i ^ (i >> 10)) & 1) === 0;
+          const dmgScale = isCrack ? 105 : ((256 - frac * 112) | 0);
+          shadeScale = (shadeScale * dmgScale) >> 8;
+        }
+
+        if (shadeScale === 256) {
+          u32[i] = c;
+        } else if (IS_LITTLE_ENDIAN) {
+          let r = ((c & 0xff) * shadeScale) >> 8;
+          let g = (((c >>> 8) & 0xff) * shadeScale) >> 8;
+          let b = (((c >>> 16) & 0xff) * shadeScale) >> 8;
+          if (r > 255) r = 255;
+          if (g > 255) g = 255;
+          if (b > 255) b = 255;
           u32[i] = (0xff << 24) | (b << 16) | (g << 8) | r;
+        } else {
+          u32[i] = tintColor(c, shadeScale / 256);
         }
       }
     }
 
-    // Draw dynamic particles directly into imgU32 for zero extra draw calls
+    // Draw dynamic particles directly into imgU32 (chunky debris, glowing spark streaks, soft dust puffs)
+    const minPx = Math.max(1, x0);
+    const maxPx = Math.min(WORLD_W - 2, x1);
+    const minPy = Math.max(1, y0);
+    const maxPy = Math.min(WORLD_H - 2, y1);
+
     for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = this.particles[i];
       if (!p.active) continue;
       const px = Math.round(p.x);
       const py = Math.round(p.y);
-      if (px >= 0 && px < WORLD_W && py >= 0 && py < WORLD_H) {
-        u32[py * WORLD_W + px] = p.color;
+      if (px < minPx || px > maxPx || py < minPy || py > maxPy) continue;
+
+      if (p.kind === 'DUST') {
+        const alphaRatio = Math.max(0, Math.min(1, p.life / p.maxLife));
+        const rad = p.size >= 3 ? 2 : 1;
+        const pc = p.color;
+        const pr = pc & 0xff;
+        const pg = (pc >>> 8) & 0xff;
+        const pb = (pc >>> 16) & 0xff;
+        const mix = (alphaRatio * 0.42 * 256) | 0;
+        if (mix <= 4) continue;
+        const inv = 256 - mix;
+
+        for (let dy = -rad; dy <= rad; dy++) {
+          const yy = py + dy;
+          if (yy <= 0 || yy >= WORLD_H - 1) continue;
+          for (let dx = -rad; dx <= rad; dx++) {
+            if (Math.abs(dx) + Math.abs(dy) > rad + 1) continue;
+            const xx = px + dx;
+            if (xx <= 0 || xx >= WORLD_W - 1) continue;
+            const ui = yy * rowStride + xx;
+            if (IS_LITTLE_ENDIAN) {
+              const dst = u32[ui];
+              if (this.transparentEmpty && (dst >>> 24) === 0) {
+                u32[ui] = ((mix >> 1) << 24) | (pb << 16) | (pg << 8) | pr;
+                continue;
+              }
+              const rr = ((dst & 0xff) * inv + pr * mix) >> 8;
+              const gg = (((dst >>> 8) & 0xff) * inv + pg * mix) >> 8;
+              const bb = (((dst >>> 16) & 0xff) * inv + pb * mix) >> 8;
+              u32[ui] = (0xff << 24) | (bb << 16) | (gg << 8) | rr;
+            }
+          }
+        }
+      } else if (p.kind === 'SPARK') {
+        u32[py * rowStride + px] = p.color;
+        const tx = Math.round(p.x - p.vx * 0.014);
+        const ty = Math.round(p.y - p.vy * 0.014);
+        if (tx >= minPx && tx <= maxPx && ty >= minPy && ty <= maxPy) {
+          const midX = (px + tx) >> 1;
+          const midY = (py + ty) >> 1;
+          u32[midY * rowStride + midX] = p.color;
+          u32[ty * rowStride + tx] = tintColor(p.color, 0.65);
+        }
+      } else if (p.size >= 2) {
+        // Chunky 2x2 shaded fragment
+        u32[py * rowStride + px] = tintColor(p.color, 1.12);
+        u32[py * rowStride + px + 1] = p.color;
+        u32[(py + 1) * rowStride + px] = p.color;
+        u32[(py + 1) * rowStride + px + 1] = tintColor(p.color, 0.75);
+      } else {
+        u32[py * rowStride + px] = p.color;
       }
     }
 
-    this.offCtx.putImageData(this.imgData, 0, 0);
+    this.offCtx.putImageData(this.imgData, 0, 0, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
 
     // Draw rotating CrumblingBody wall segments!
     for (let i = 0; i < this.bodies.length; i++) {
       const b = this.bodies[i];
+      if (b.x + b.w < x0 || b.x - b.w > x1 || b.y + b.h < y0 || b.y - b.h > y1) continue;
       const c = this.bodyCanvases.get(b.id);
       if (!c) continue;
       this.offCtx.save();

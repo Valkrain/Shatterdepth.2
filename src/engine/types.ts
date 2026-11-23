@@ -1,8 +1,8 @@
-export const WORLD_W = 1280;
-export const WORLD_H = 384;
+export const WORLD_W = 1920;
+export const WORLD_H = 512;
 export const CHUNK_SIZE = 32;
-export const CHUNKS_X = WORLD_W / CHUNK_SIZE; // 40
-export const CHUNKS_Y = WORLD_H / CHUNK_SIZE; // 12
+export const CHUNKS_X = WORLD_W / CHUNK_SIZE; // 60
+export const CHUNKS_Y = WORLD_H / CHUNK_SIZE; // 16
 
 export enum Mat {
   EMPTY = 0,
@@ -29,6 +29,7 @@ export enum Mat {
   CHAIN = 21,
   TORCH = 22,
   BARREL = 23,
+  LAVA = 24,
 }
 
 export type DamageType =
@@ -38,7 +39,10 @@ export type DamageType =
   | 'PLASMA'
   | 'ARC'
   | 'CORROSIVE'
-  | 'LASER';
+  | 'LASER'
+  | 'CRYOGENIC'
+  | 'SONIC'
+  | 'VOID';
 
 export const DAMAGE_TYPE_LABELS: Record<DamageType, string> = {
   KINETIC: 'Kinetic',
@@ -48,6 +52,9 @@ export const DAMAGE_TYPE_LABELS: Record<DamageType, string> = {
   ARC: 'Arc',
   CORROSIVE: 'Corrosive',
   LASER: 'Laser',
+  CRYOGENIC: 'Cryogenic',
+  SONIC: 'Sonic',
+  VOID: 'Void',
 };
 
 export interface MaterialProps {
@@ -162,7 +169,7 @@ export const MAT_PROPS: Record<Mat, MaterialProps> = {
     damageMul: { EXPLOSIVE: 2.4, KINETIC: 2.0, ARC: 1.7, LASER: 1.5, THERMAL: 0.8 },
   },
   [Mat.CHAIN]: {
-    solid: true, liquid: false, gas: false, powder: false, flammable: false,
+    solid: false, liquid: false, gas: false, powder: false, flammable: false,
     hardness: 2, maxHp: 24, weight: 4, corrodible: true,
     damageMul: { ARC: 2.6, CORROSIVE: 2.2, PLASMA: 1.7, LASER: 1.5, KINETIC: 0.65, THERMAL: 0.45 },
   },
@@ -175,6 +182,10 @@ export const MAT_PROPS: Record<Mat, MaterialProps> = {
     solid: true, liquid: false, gas: false, powder: false, flammable: true,
     hardness: 1, maxHp: 6, weight: 4, corrodible: true,
     damageMul: { THERMAL: 3.0, EXPLOSIVE: 2.5, PLASMA: 2.5, KINETIC: 1.8, ARC: 1.8 },
+  },
+  [Mat.LAVA]: {
+    solid: false, liquid: true, gas: false, powder: false, flammable: false,
+    hardness: 0, maxHp: 1, weight: 4, corrodible: false, damageMul: { CRYOGENIC: 1.6 },
   },
 };
 
@@ -220,7 +231,7 @@ export interface BiomeConfig {
   hudPalette: HudPalette;
 }
 
-export type GameState = 'TITLE_MENU' | 'PLAYING' | 'PAUSED' | 'LEVEL_UPGRADE' | 'BOSS_RELIC' | 'GAME_OVER';
+export type GameState = 'START_SCREEN' | 'TITLE_MENU' | 'HUB_WORLD' | 'PLAYING' | 'PAUSED' | 'LEVEL_UPGRADE' | 'BOSS_RELIC' | 'WEAPON_FORGE' | 'GAME_OVER';
 
 export type WeaponId =
   | 'PULSE_CARBINE'
@@ -229,7 +240,12 @@ export type WeaponId =
   | 'PLASMA_RAIL'
   | 'ARC_CASTER'
   | 'ACID_MORTAR'
-  | 'MINING_BEAM';
+  | 'MINING_BEAM'
+  | 'CRYOMANCER_BLASTER'
+  | 'SONIC_REPEATER'
+  | 'VOID_SINGULARITY_GUN'
+  | 'HEAVY_CHAIN_MINIGUN'
+  | 'GRAVITON_CANNON';
 
 export interface WeaponDef {
   id: WeaponId;
@@ -307,10 +323,14 @@ export interface RelicDraftOption {
   nextLevel: number;
 }
 
+export type ParticleVisualKind = 'DEBRIS' | 'SPARK' | 'DUST';
+
 export interface DynamicParticle {
   active: boolean;
   x: number;
   y: number;
+  prevX: number;
+  prevY: number;
   vx: number;
   vy: number;
   mat: Mat;
@@ -318,6 +338,8 @@ export interface DynamicParticle {
   life: number;
   maxLife: number;
   bounces: number;
+  size: number;
+  kind: ParticleVisualKind;
   settleOnRest: boolean;
   igniteOnHit: boolean;
 }
@@ -352,6 +374,33 @@ export type EnemyKind =
   | 'PYRO_IMP'
   | 'CRYSTAL_WISP';
 
+export type BossHullStyle = 'CITADEL' | 'BOILER' | 'DIAMOND' | 'RIBCAGE';
+export type BossCrownStyle = 'HORNED' | 'SMOKESTACKS' | 'DOME' | 'PRONG_SPIRE' | 'TURRET_CAP';
+export type BossLimbStyle = 'PAULDRON_ARM' | 'CANNON_POD' | 'CRYSTAL_WING' | 'SHIELD_PLATE' | 'CLAW_PINCER';
+export type BossBaseStyle = 'PILLAR_LEGS' | 'TANK_TREADS' | 'THRUSTER_BELLS' | 'SPIKE_KEEL';
+export type BossCoreSlot = 'CHEST' | 'CROWN' | 'LEFT_POD' | 'RIGHT_POD' | 'KEEL';
+
+export interface BossParts {
+  hull: BossHullStyle;
+  crown: BossCrownStyle;
+  leftLimb: BossLimbStyle;
+  rightLimb: BossLimbStyle;
+  base: BossBaseStyle;
+  coreSlot: BossCoreSlot;
+  hw: number;
+  hh: number;
+  leftMountY: number;
+  rightMountY: number;
+  crownBaseY: number;
+  baseTopY: number;
+  initialCounts: {
+    crown: number;
+    leftLimb: number;
+    rightLimb: number;
+    base: number;
+  };
+}
+
 export interface PixelBoss {
   id: number;
   biomeId: BiomeId;
@@ -384,6 +433,27 @@ export interface PixelBoss {
   arenaMinX: number;
   arenaMaxX: number;
   arenaFloorY: number;
+  parts: BossParts;
+  specialList: string[];
+  specialIdx: number;
+  specialCd: number;
+  telegraphTimer: number;
+  telegraphDuration: number;
+  pendingSpecialId: string | null;
+  pendingTargetX: number;
+  pendingTargetY: number;
+  activeSpecialId: string | null;
+  activeSpecialTimer: number;
+  activeSpecialTick: number;
+  specialDir: 1 | -1;
+  shieldActiveTimer: number;
+  shieldSide: -1 | 1;
+  disabledParts: {
+    crown?: boolean;
+    leftLimb?: boolean;
+    rightLimb?: boolean;
+    base?: boolean;
+  };
 }
 
 export interface Enemy {
@@ -452,6 +522,47 @@ export interface Portal {
   y: number;
   active: boolean;
 }
+
+export interface HubNpc {
+  id: 'ARCHIVIST';
+  name: string;
+  title: string;
+  x: number;
+  y: number;
+  facing: 1 | -1;
+  idlePhase: number;
+  glowRgb: [number, number, number];
+  greetCooldown: number;
+  loreReady: boolean;
+}
+
+export interface HubTarget {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  hp: number;
+  maxHp: number;
+  hitFlash: number;
+  respawnTimer: number;
+  label: string;
+}
+
+export interface LevelLightDef {
+  x: number;
+  y: number;
+  radius: number;
+  rgb: [number, number, number];
+  intensity: number;
+  volumetric: number;
+  castShadows: boolean;
+  rayCount?: number;
+  flickerSpeed?: number;
+  flickerAmp?: number;
+}
+
+export type HubLightDef = LevelLightDef;
 
 export interface Player {
   x: number;
@@ -526,10 +637,17 @@ export interface HudSnapshot {
     hp: number;
     maxHp: number;
     corePct: number;
+    activeAttack?: string | null;
   } | null;
 }
 
 export interface MetaProgress {
+  persistentGold: number;
+  maxHpLevel: number;
+  startBombsLevel: number;
+  damageLevel: number;
+  speedLevel: number;
+  armorLevel: number;
   bestDepth: number;
   bestGold: number;
   totalPixelsDestroyed: number;
