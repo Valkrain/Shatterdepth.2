@@ -234,22 +234,39 @@ export interface BiomeConfig {
 export type GameState = 'START_SCREEN' | 'TITLE_MENU' | 'HUB_WORLD' | 'PLAYING' | 'PAUSED' | 'LEVEL_UPGRADE' | 'BOSS_RELIC' | 'WEAPON_FORGE' | 'GAME_OVER';
 
 export type WeaponId =
+  | 'RIVET_PUNCHER'
+  | 'CINDER_BELLOWS'
   | 'PULSE_CARBINE'
+  | 'BRINE_SPRAYER'
+  | 'QUARRY_THUMPER'
+  | 'MINING_BEAM'
   | 'EMBER_SCATTER'
   | 'FLAK_CANNON'
-  | 'PLASMA_RAIL'
-  | 'ARC_CASTER'
-  | 'ACID_MORTAR'
-  | 'MINING_BEAM'
-  | 'CRYOMANCER_BLASTER'
-  | 'SONIC_REPEATER'
-  | 'VOID_SINGULARITY_GUN'
+  | 'SLAG_SLINGER'
+  | 'AETHER_SAW'
+  | 'RIME_HARPOON'
+  | 'RESONANCE_FORK'
   | 'HEAVY_CHAIN_MINIGUN'
-  | 'GRAVITON_CANNON';
+  | 'ACID_MORTAR'
+  | 'ARC_CASTER'
+  | 'CRYOMANCER_BLASTER'
+  | 'SUN_SIPHON_LANCE'
+  | 'OBLIVION_CHIME'
+  | 'TEMPEST_CHOIR'
+  | 'TECTONIC_RAM'
+  | 'SONIC_REPEATER'
+  | 'PLASMA_RAIL'
+  | 'GRAVITON_CANNON'
+  | 'VOID_SINGULARITY_GUN';
+
+export type WeaponTier = 1 | 2 | 3;
 
 export interface WeaponDef {
   id: WeaponId;
   name: string;
+  tier: WeaponTier;
+  unlockCost: number;
+  isStarter?: boolean;
   damageType: DamageType;
   description: string;
   cooldown: number; // seconds
@@ -473,11 +490,14 @@ export interface Enemy {
   aiTimer: number;
   hurtFlash: number;
   goldValue: number;
+  cryoTimer?: number;
+  enrageTimer?: number;
 }
 
 export interface Projectile {
   id: number;
   fromPlayer: boolean;
+  weaponId?: WeaponId;
   damageType: DamageType;
   x: number;
   y: number;
@@ -495,18 +515,46 @@ export interface Projectile {
   color: string;
   radius: number;
   age: number;
+  bouncesLeft?: number;
+  embedFuse?: number;
+  embedded?: boolean;
+  spawnLava?: boolean;
+  spawnBrine?: boolean;
+  harpoonPull?: boolean;
+  ballLightning?: boolean;
+  zapTimer?: number;
+  sonicCrumblePath?: boolean;
+  voidEraseImplode?: boolean;
+  knockbackMul?: number;
 }
 
 export interface Pickup {
   id: number;
-  kind: 'GOLD' | 'HEALTH' | 'BOMB' | 'WEAPON';
+  kind: 'GOLD' | 'HEALTH' | 'BOMB' | 'WEAPON' | 'LORE_PAGE';
   x: number;
   y: number;
   vx: number;
   vy: number;
   value: number;
   weaponId?: WeaponId;
+  loreId?: string;
   age: number;
+}
+
+export type LoreCategory = 'WORLD_STRATA' | 'BESTIARY' | 'ARSENAL';
+
+export interface LorePageDef {
+  id: string;
+  title: string;
+  subtitle: string;
+  category: LoreCategory;
+  unlockHint: string;
+  statsLine?: string;
+  tooltip?: string;
+  quote?: string;
+  body: string[];
+  archivistRemark: string;
+  accentColor: string;
 }
 
 export interface RelicPedestal {
@@ -524,7 +572,7 @@ export interface Portal {
 }
 
 export interface HubNpc {
-  id: 'ARCHIVIST';
+  id: 'ARCHIVIST' | 'VANCE';
   name: string;
   title: string;
   x: number;
@@ -630,6 +678,7 @@ export interface HudSnapshot {
   nearInteractable: string | null;
   enemiesRemaining: number;
   bossAlert: string | null;
+  strataAlert?: string | null;
   boss: {
     name: string;
     subtitle: string;
@@ -639,6 +688,22 @@ export interface HudSnapshot {
     corePct: number;
     activeAttack?: string | null;
   } | null;
+}
+
+export type ClemencyUpgradeId =
+  | 'SOVEREIGN_AEGIS'
+  | 'AETHER_OVERCLOCK'
+  | 'COVENANT_SEAL'
+  | 'EXCHEQUERY_WARRANT';
+
+export interface ClemencyUpgradeDef {
+  id: ClemencyUpgradeId;
+  name: string;
+  subtitle: string;
+  description: string;
+  maxRank: number;
+  sealCost: number;
+  accentColor: string;
 }
 
 export interface MetaProgress {
@@ -653,4 +718,13 @@ export interface MetaProgress {
   totalPixelsDestroyed: number;
   totalCollapses: number;
   runsCompleted: number;
+  unlockedLoreIds: string[];
+  lastUnlockedLoreId: string | null;
+  totalGoldRemitted?: number;
+  clemencyGranted?: boolean;
+  clemencyCount?: number;
+  clemencySeals?: number;
+  unlockedWeaponIds?: WeaponId[];
+  unlockedRelicIds?: RelicId[];
+  clemencyUpgradeLevels?: Partial<Record<ClemencyUpgradeId, number>>;
 }

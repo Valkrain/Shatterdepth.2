@@ -5,9 +5,18 @@ import {
   getBossOriginWorld,
   getPartDisabledCallout,
 } from './bossSpecials';
-import { BOSS_RELICS, CLASSES, LOOTABLE_WEAPONS, PERKS, WEAPONS } from './catalog';
+import {
+  BOSS_RELICS,
+  CLASSES,
+  LOOTABLE_WEAPONS,
+  PERKS,
+  STARTER_UNLOCKED_WEAPONS,
+  VANCE_DIALOGUE,
+  WEAPONS,
+} from './catalog';
 import { generateHubLevel, generateLevel } from './LevelGenerator';
 import { getAmmoLightSpec, LightingEngine, LightSource, parseHexRgb } from './LightingEngine';
+import { LORE_CATALOG, LORE_CATALOG_MAP, WORLD_LORE_IDS } from './loreCatalog';
 import { PixelWorld } from './PixelWorld';
 import { packColor } from './prng';
 import { rockMusic } from './RockMusicEngine';
@@ -124,6 +133,12 @@ export interface EngineCallbacks {
   onOpenVaultModal?: () => void;
   onOpenExpeditionModal?: () => void;
   onOpenSettingsModal?: () => void;
+  onOpenTomeModal?: () => void;
+  onOpenContrabandModal?: () => void;
+  onUnlockLore?: (loreId: string) => void;
+  onUnlockWeapon?: (weaponId: WeaponId) => void;
+  onUnlockRelic?: (relicId: RelicId) => void;
+  onGrantClemency?: (depth: number, gold: number) => void;
 }
 
 const GRAVITY = 420;
@@ -166,6 +181,12 @@ export class GameEngine {
   private hubTargets: HubTarget[] = [];
   private levelLights: LevelLightDef[] = [];
   private archivistLineIdx = 0;
+  private vanceLineIdx = 0;
+  private unlockedWeaponPool: WeaponId[] = [...STARTER_UNLOCKED_WEAPONS];
+  private strataAlertText: string | null = null;
+  private strataAlertTimer = 0;
+  private unlockedLoreSet = new Set<string>();
+  private lastUnlockedLoreId: string | null = null;
   private scarfNodes: Array<{ x: number; y: number }> = [];
   private weaponRecoil = 0;
   private ambientMoteTimer = 0;
@@ -177,6 +198,9 @@ export class GameEngine {
   private playerSpeedMul = 1.0;
   private metaDamageMul = 1.0;
   private metaArmorMul = 1.0;
+  private clemencyBlastRadiusMul = 1.0;
+  private clemencyGoldMul = 1.0;
+  private clemencyEnrageDurMul = 1.0;
   private dashCount = 0;
   private collapseHealCooldown = 0;
 
@@ -325,6 +349,8 @@ export class GameEngine {
     this.dashGhosts = [];
     this.transientLights = [];
     this.weaponRecoil = 0;
+    this.strataAlertText = null;
+    this.strataAlertTimer = 0;
 
     const cls = CLASSES['BREACHER'];
     this.player = {
@@ -371,7 +397,12 @@ export class GameEngine {
     this.emitHud();
   }
 
-  startNewRun(classId: ClassId, seed: number, meta?: MetaProgress): void {
+  startNewRun(
+    classId: ClassId,
+    seed: number,
+    meta?: MetaProgress,
+    starterWeapons?: [WeaponId, WeaponId]
+  ): void {
     sfx.unlock();
     const cls = CLASSES[classId];
     this.seed = seed;
@@ -381,16 +412,34 @@ export class GameEngine {
     this.dashCount = 0;
     this.collapseHealCooldown = 0;
 
-    const maxHp = cls.maxHp + (meta?.maxHpLevel ?? 0) * 25;
-    const maxBombs = cls.maxBombs + (meta?.startBombsLevel ?? 0);
-    this.metaDamageMul = 1.0 + (meta?.damageLevel ?? 0) * 0.06;
-    this.metaArmorMul = Math.max(0.1, 1.0 - (meta?.armorLevel ?? 0) * 0.04);
+    const clem = meta?.clemencyUpgradeLevels ?? {};
+    const aegisRank = clem.SOVEREIGN_AEGIS ?? 0;
+    const overclockRank = clem.AETHER_OVERCLOCK ?? 0;
+    const covenantRank = clem.COVENANT_SEAL ?? 0;
+    const warrantRank = clem.EXCHEQUERY_WARRANT ?? 0;
+
+    const maxHp = cls.maxHp + (meta?.maxHpLevel ?? 0) * 25 + aegisRank * 15;
+    const maxBombs = cls.maxBombs + (meta?.startBombsLevel ?? 0) + warrantRank;
+    this.metaDamageMul = (1.0 + (meta?.damageLevel ?? 0) * 0.06) * (1.0 + overclockRank * 0.1);
+    this.metaArmorMul = Math.max(0.1, (1.0 - (meta?.armorLevel ?? 0) * 0.04) * (1.0 - aegisRank * 0.08));
     this.playerSpeedMul = cls.speedMul * (1.0 + (meta?.speedLevel ?? 0) * 0.05);
+    this.clemencyBlastRadiusMul = 1.0 + overclockRank * 0.1;
+    this.clemencyGoldMul = 1.0 + covenantRank * 0.2;
+    this.clemencyEnrageDurMul = Math.max(0.15, 1.0 - covenantRank * 0.35);
+    if (meta) {
+      this.syncLoreProgress(meta.unlockedLoreIds ?? [], meta.lastUnlockedLoreId ?? null);
+      this.syncWeaponPool(meta.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS);
+    }
 
     this.world.pixelsDestroyedCount = 0;
     this.world.segmentsCollapsedCount = 0;
     this.forgeUpgradeCount = 0;
     this.forgeRerollCount = 0;
+
+    const chosenWeapons: [WeaponId, WeaponId] =
+      starterWeapons && starterWeapons.length === 2
+        ? [starterWeapons[0], starterWeapons[1]]
+        : [cls.primaryWeapon, cls.secondaryWeapon];
 
     this.player = {
       x: 60,
@@ -411,8 +460,8 @@ export class GameEngine {
       dashTimer: 0,
       dashCooldown: 0,
       invulnTimer: 0,
-      weapons: [cls.primaryWeapon, cls.secondaryWeapon],
-      weaponDupes: {},
+      weapons: [...chosenWeapons],
+      weaponDupes: warrantRank > 0 ? { [chosenWeapons[0]]: warrantRank } : {},
       activeWeaponIdx: 0,
       fireCooldown: 0,
       bombs: maxBombs,
@@ -428,7 +477,13 @@ export class GameEngine {
     this.setState('PLAYING');
   }
 
-  startBossRun(classId: ClassId, seed: number, meta?: MetaProgress, targetDepth = 10): void {
+  startBossRun(
+    classId: ClassId,
+    seed: number,
+    meta?: MetaProgress,
+    targetDepth = 10,
+    starterWeapons?: [WeaponId, WeaponId]
+  ): void {
     sfx.unlock();
     const cls = CLASSES[classId];
     this.seed = (seed ^ Math.floor(Math.random() * 0x7FFFFFFF)) >>> 0;
@@ -438,16 +493,34 @@ export class GameEngine {
     this.dashCount = 0;
     this.collapseHealCooldown = 0;
 
-    const maxHp = cls.maxHp + (meta?.maxHpLevel ?? 0) * 25;
-    const maxBombs = cls.maxBombs + (meta?.startBombsLevel ?? 0);
-    this.metaDamageMul = 1.0 + (meta?.damageLevel ?? 0) * 0.06;
-    this.metaArmorMul = Math.max(0.1, 1.0 - (meta?.armorLevel ?? 0) * 0.04);
+    const clem = meta?.clemencyUpgradeLevels ?? {};
+    const aegisRank = clem.SOVEREIGN_AEGIS ?? 0;
+    const overclockRank = clem.AETHER_OVERCLOCK ?? 0;
+    const covenantRank = clem.COVENANT_SEAL ?? 0;
+    const warrantRank = clem.EXCHEQUERY_WARRANT ?? 0;
+
+    const maxHp = cls.maxHp + (meta?.maxHpLevel ?? 0) * 25 + aegisRank * 15;
+    const maxBombs = cls.maxBombs + (meta?.startBombsLevel ?? 0) + warrantRank;
+    this.metaDamageMul = (1.0 + (meta?.damageLevel ?? 0) * 0.06) * (1.0 + overclockRank * 0.1);
+    this.metaArmorMul = Math.max(0.1, (1.0 - (meta?.armorLevel ?? 0) * 0.04) * (1.0 - aegisRank * 0.08));
     this.playerSpeedMul = cls.speedMul * (1.0 + (meta?.speedLevel ?? 0) * 0.05);
+    this.clemencyBlastRadiusMul = 1.0 + overclockRank * 0.1;
+    this.clemencyGoldMul = 1.0 + covenantRank * 0.2;
+    this.clemencyEnrageDurMul = Math.max(0.15, 1.0 - covenantRank * 0.35);
+    if (meta) {
+      this.syncLoreProgress(meta.unlockedLoreIds ?? [], meta.lastUnlockedLoreId ?? null);
+      this.syncWeaponPool(meta.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS);
+    }
 
     this.world.pixelsDestroyedCount = 0;
     this.world.segmentsCollapsedCount = 0;
     this.forgeUpgradeCount = 0;
     this.forgeRerollCount = 0;
+
+    const chosenWeapons: [WeaponId, WeaponId] =
+      starterWeapons && starterWeapons.length === 2
+        ? [starterWeapons[0], starterWeapons[1]]
+        : [cls.primaryWeapon, cls.secondaryWeapon];
 
     this.player = {
       x: 60,
@@ -468,8 +541,8 @@ export class GameEngine {
       dashTimer: 0,
       dashCooldown: 0,
       invulnTimer: 0,
-      weapons: [cls.primaryWeapon, cls.secondaryWeapon],
-      weaponDupes: {},
+      weapons: [...chosenWeapons],
+      weaponDupes: warrantRank > 0 ? { [chosenWeapons[0]]: warrantRank } : {},
       activeWeaponIdx: 0,
       fireCooldown: 0,
       bombs: maxBombs,
@@ -487,7 +560,7 @@ export class GameEngine {
 
   private loadDepth(depth: number): void {
     this.depth = depth;
-    const lvl = generateLevel(this.world, this.seed, depth);
+    const lvl = generateLevel(this.world, this.seed, depth, this.unlockedWeaponPool);
     this.biome = lvl.biome;
     this.enemies = lvl.enemies;
     this.boss = lvl.boss;
@@ -511,6 +584,8 @@ export class GameEngine {
     this.hubTargets = [];
     this.levelLights = lvl.levelLights ?? [];
     this.weaponRecoil = 0;
+    this.strataAlertText = null;
+    this.strataAlertTimer = 0;
 
     this.player.x = lvl.spawnX;
     this.player.y = lvl.spawnY;
@@ -644,8 +719,94 @@ export class GameEngine {
     this.player.hp = Math.min(this.player.maxHp, this.player.hp + 25);
     const label = nextLv > 1 ? `${BOSS_RELICS[relicId].name} Rank ${nextLv}` : BOSS_RELICS[relicId].name;
     this.spawnFloatingText(this.player.x, this.player.y - 18, label, BOSS_RELICS[relicId].accentColor);
+    this.unlockLore(`RELIC_${relicId}`);
+    this.callbacks.onUnlockRelic?.(relicId);
     this.setState('PLAYING');
     this.emitHud();
+  }
+
+  syncLoreProgress(unlockedIds: string[], lastUnlockedId: string | null): void {
+    this.unlockedLoreSet = new Set(unlockedIds);
+    this.lastUnlockedLoreId = lastUnlockedId;
+  }
+
+  syncWeaponPool(unlockedIds: WeaponId[]): void {
+    const valid = unlockedIds.filter((id) => Boolean(WEAPONS[id]));
+    this.unlockedWeaponPool = valid.length > 0 ? valid : [...STARTER_UNLOCKED_WEAPONS];
+  }
+
+  equipHubWeapon(weaponId: WeaponId): void {
+    const wDef = WEAPONS[weaponId];
+    if (!wDef) return;
+    this.unlockLore(`WEAPON_${weaponId}`, true);
+    this.unlockLore(`DMG_${wDef.damageType}`, false);
+    if (!this.unlockedWeaponPool.includes(weaponId)) {
+      this.unlockedWeaponPool.push(weaponId);
+    }
+    if (this.player) {
+      const existingIdx = this.player.weapons.indexOf(weaponId);
+      if (existingIdx !== -1) {
+        this.player.activeWeaponIdx = existingIdx;
+      } else if (this.player.weapons.length < 4) {
+        this.player.weapons.push(weaponId);
+        this.player.activeWeaponIdx = this.player.weapons.length - 1;
+      } else {
+        this.player.weapons[this.player.activeWeaponIdx] = weaponId;
+      }
+      sfx.playPickup('upgrade');
+      this.spawnShockRing(this.player.x, this.player.y - 10, 18, wDef.color);
+      this.spawnFloatingText(this.player.x, this.player.y - 22, `Range Test: ${wDef.name}`, wDef.color);
+      this.emitHud();
+    }
+  }
+
+  private unlockLore(loreId: string, announce = true): void {
+    if (this.unlockedLoreSet.has(loreId)) return;
+    const def = LORE_CATALOG_MAP[loreId];
+    if (!def) return;
+    this.unlockedLoreSet.add(loreId);
+    this.lastUnlockedLoreId = loreId;
+    this.callbacks.onUnlockLore?.(loreId);
+    if (announce) {
+      this.strataAlertText = `Lore Page Bound — ${def.title} (${this.unlockedLoreSet.size}/${LORE_CATALOG.length})`;
+      this.strataAlertTimer = 3.8;
+      if (this.player) {
+        this.spawnFloatingText(
+          this.player.x,
+          this.player.y - this.player.h - 10,
+          `Lore: ${def.title}`,
+          def.accentColor
+        );
+      }
+    }
+  }
+
+  private unlockNextWorldLorePage(): void {
+    const biomeLoreId = `BIOME_${this.biome?.id ?? 'SUNKEN_MASONRY'}`;
+    if (!this.unlockedLoreSet.has('STRATA_OVERVIEW')) {
+      this.unlockLore('STRATA_OVERVIEW', true);
+      return;
+    }
+    if (LORE_CATALOG_MAP[biomeLoreId] && !this.unlockedLoreSet.has(biomeLoreId)) {
+      this.unlockLore(biomeLoreId, true);
+      return;
+    }
+    for (const id of WORLD_LORE_IDS) {
+      if (!this.unlockedLoreSet.has(id)) {
+        this.unlockLore(id, true);
+        return;
+      }
+    }
+    for (const page of LORE_CATALOG) {
+      if (!this.unlockedLoreSet.has(page.id)) {
+        this.unlockLore(page.id, true);
+        return;
+      }
+    }
+    if (this.player) {
+      this.player.gold += 25;
+      this.spawnFloatingText(this.player.x, this.player.y - this.player.h - 8, 'Archive Complete +25g', '#FACC15');
+    }
   }
 
   private getRelicLevel(id: RelicId): number {
@@ -796,6 +957,8 @@ export class GameEngine {
     return { x: wx, y: wy };
   }
 
+  private combatMusicHeat = 0;
+
   private update(dt: number): void {
     if (this.state === 'TITLE_MENU') {
       this.world.step(dt);
@@ -804,25 +967,85 @@ export class GameEngine {
       this.camX += this.demoPanDir * 14 * dt;
       if (this.camX > WORLD_W - this.viewSimW - 40) this.demoPanDir = -1;
       if (this.camX < 40) this.demoPanDir = 1;
-      rockMusic.updateIntensity(0);
+      rockMusic.updateActionState({ mode: 'TITLE', stratum: 1, intensity: 0 });
       return;
     }
 
     if (this.state !== 'PLAYING' && this.state !== 'HUB_WORLD') {
-      rockMusic.updateIntensity(0);
+      rockMusic.updateActionState({ mode: 'TITLE', intensity: 0.1 });
       return;
     }
 
     const isHub = this.state === 'HUB_WORLD';
+    const stratum: 1 | 2 | 3 = this.depth <= 10 ? 1 : this.depth <= 20 ? 2 : 3;
 
-    const enemyCount = isHub ? 0 : this.enemies.length;
-    const projCount = this.projectiles.length;
-    const hasBoss = (isHub || !this.boss) ? 0 : 1;
-    const actionIntensity = isHub ? 0 : Math.min(
-      1,
-      enemyCount * 0.14 + projCount * 0.04 + hasBoss * 0.45 + (this.shakeMag > 1.5 ? 0.35 : 0)
-    );
-    rockMusic.updateIntensity(actionIntensity);
+    if (isHub) {
+      this.combatMusicHeat = 0;
+      rockMusic.updateActionState({
+        mode: 'HUB',
+        stratum: 1,
+        intensity: 0.15,
+        lowHealth: false,
+        enraged: false,
+      });
+    } else {
+      // Smoothly decay combat heat over ~4.5s so firefights maintain musical momentum between volleys
+      this.combatMusicHeat = Math.max(0, this.combatMusicHeat - dt * 0.22);
+
+      let nearbyThreats = 0;
+      let enragedCount = 0;
+      const px = this.player.x;
+      const py = this.player.y;
+      for (const en of this.enemies) {
+        const dist = Math.hypot(en.x - px, en.y - py);
+        if ((en.enrageTimer ?? 0) > 0.2 && dist < 440) {
+          enragedCount++;
+        }
+        if (dist < 280) {
+          nearbyThreats += dist < 150 ? 1.35 : 0.85;
+        }
+      }
+
+      let enemyProjCount = 0;
+      for (const pr of this.projectiles) {
+        if (!pr.fromPlayer) enemyProjCount++;
+      }
+
+      if ((this.mouseDownLeft || this.touchAimFiring) && (nearbyThreats > 0 || this.boss)) {
+        this.combatMusicHeat = Math.min(1, this.combatMusicHeat + dt * 0.55);
+      }
+      if (enemyProjCount > 0) {
+        this.combatMusicHeat = Math.min(1, this.combatMusicHeat + dt * 0.35);
+      }
+
+      const isSanctuary = this.enemies.length === 0 && !this.boss && this.depth % 5 === 0 && this.depth % 10 !== 0;
+      const hasBoss = Boolean(this.boss);
+      const threatIntensity = Math.min(
+        0.72,
+        nearbyThreats * 0.18 + enragedCount * 0.22 + enemyProjCount * 0.07
+      );
+      const rawIntensity = hasBoss
+        ? Math.min(1, 0.82 + this.combatMusicHeat * 0.18)
+        : isSanctuary
+          ? 0.12
+          : Math.min(1, 0.12 + threatIntensity + this.combatMusicHeat * 0.42);
+
+      const mode = hasBoss
+        ? 'BOSS'
+        : isSanctuary
+          ? 'SANCTUARY'
+          : rawIntensity >= 0.34
+            ? 'COMBAT'
+            : 'EXPLORE';
+
+      rockMusic.updateActionState({
+        mode,
+        stratum,
+        intensity: rawIntensity,
+        lowHealth: this.player.hp / Math.max(1, this.player.maxHp) < 0.3,
+        enraged: enragedCount > 0,
+      });
+    }
 
     this.elapsedSeconds += dt;
     this.collapseHealCooldown = Math.max(0, this.collapseHealCooldown - dt);
@@ -837,6 +1060,59 @@ export class GameEngine {
 
     // Step pixel world (CA, falling particles, rotating crumbling wall segments!)
     this.world.step(dt);
+
+    if (this.strataAlertTimer > 0) {
+      this.strataAlertTimer = Math.max(0, this.strataAlertTimer - dt);
+      if (this.strataAlertTimer <= 0) {
+        this.strataAlertText = null;
+      }
+    }
+
+    const strataEvents = this.world.consumeStrataEvents();
+    if (strataEvents.length > 0) {
+      this.unlockLore('STRATA_OVERVIEW', false);
+      this.combatMusicHeat = Math.min(1, this.combatMusicHeat + 0.38);
+      rockMusic.triggerCombatAccent('CHAIN_REACTION');
+      for (const ev of strataEvents) {
+        if (ev.kind === 'VOLATILE_VEIN') {
+          sfx.playExplosion(0.85);
+          this.shakeMag = Math.max(this.shakeMag, 4.8);
+          this.spawnShockRing(ev.x, ev.y, 26, '#38BDF8');
+          this.spawnTransientLight(ev.x, ev.y, 68, [120, 235, 255], 1.15, 0.34, 0.42, true);
+          this.spawnFloatingText(ev.x, ev.y - 10, 'VOLATILE VEIN CHAIN!', '#7DD3FC');
+          this.strataAlertText = 'Strata Chain Reaction — Volatile Crystal Vein Detonated!';
+          this.strataAlertTimer = 3.2;
+          this.unlockLore('STRATA_VOLATILE_VEINS', true);
+        } else if (ev.kind === 'OIL_BLOWOUT') {
+          sfx.playExplosion(1.1);
+          this.shakeMag = Math.max(this.shakeMag, 6.2);
+          this.spawnShockRing(ev.x, ev.y, 32, '#F97316');
+          this.spawnTransientLight(ev.x, ev.y, 82, [255, 145, 48], 1.35, 0.4, 0.52, true);
+          this.spawnFloatingText(ev.x, ev.y - 10, 'PRESSURIZED OIL BLOWOUT!', '#FB923C');
+          this.strataAlertText = 'Strata Chain Reaction — Pressurized Oil Pocket Breached!';
+          this.strataAlertTimer = 3.4;
+          this.unlockLore('STRATA_PRESSURIZED_OIL', true);
+        } else if (ev.kind === 'ACID_CAVITY') {
+          sfx.playExplosion(0.75);
+          this.shakeMag = Math.max(this.shakeMag, 3.6);
+          this.spawnShockRing(ev.x, ev.y, 22, '#4ADE80');
+          this.spawnTransientLight(ev.x, ev.y, 56, [84, 242, 132], 1.05, 0.3, 0.38, true);
+          this.spawnFloatingText(ev.x, ev.y - 10, 'ACID CAVITY RUPTURED!', '#86EFAC');
+          this.strataAlertText = 'Strata Chain Reaction — Honeycombed Acid Cavity Ruptured!';
+          this.strataAlertTimer = 3.0;
+          this.unlockLore('STRATA_ACID_HONEYCOMB', true);
+        } else if (ev.kind === 'FAULT_COLLAPSE') {
+          sfx.playExplosion(0.7);
+          this.shakeMag = Math.max(this.shakeMag, 3.8);
+          this.spawnShockRing(ev.x, ev.y, 20, '#FBBF24');
+          this.spawnTransientLight(ev.x, ev.y, 48, [255, 190, 96], 0.95, 0.25, 0.32, false);
+          this.spawnFloatingText(ev.x, ev.y - 10, 'THERMAL FAULT SHATTERED!', '#FDE047');
+          this.strataAlertText = 'Strata Chain Reaction — Thermally Stressed Masonry Fractured!';
+          this.strataAlertTimer = 2.8;
+          this.unlockLore('STRATA_THERMAL_FAULTS', true);
+        }
+      }
+    }
 
     if (!isHub) {
       // Spawn collectible gold shards from mined GOLD veins & smashed JARs
@@ -854,9 +1130,38 @@ export class GameEngine {
         });
       }
 
+      // The Golden Covenant ("Gold is inviolate"): mining sacred Vaelic gold enrages nearby constructs!
+      const goldMinedEvents = this.world.consumeGoldMinedEvents();
+      if (goldMinedEvents.length > 0) {
+        this.unlockLore('LORE_GOLDEN_COVENANT', true);
+        let enragedCount = 0;
+        for (const gev of goldMinedEvents) {
+          for (const en of this.enemies) {
+            if (Math.hypot(en.x - gev.x, en.y - gev.y) <= 260) {
+              const wasEnraged = (en.enrageTimer ?? 0) > 0.5;
+              en.enrageTimer = Math.max(en.enrageTimer ?? 0, 6.0 * this.clemencyEnrageDurMul);
+              if (!wasEnraged) {
+                enragedCount++;
+                this.spawnShockRing(en.x, en.y - en.h * 0.5, 16, '#FACC15');
+                this.spawnFloatingText(en.x, en.y - en.h - 6, 'COVENANT ENRAGED!', '#FACC15');
+              }
+            }
+          }
+        }
+        if (enragedCount > 0) {
+          this.combatMusicHeat = Math.min(1, this.combatMusicHeat + 0.5);
+          rockMusic.triggerCombatAccent('BOSS_STING');
+          this.strataAlertText = 'Golden Covenant Breached — Nearby Vaelic Constructs Enraged!';
+          this.strataAlertTimer = 3.2;
+        }
+      }
+
       // Apply crushing hits from falling CrumblingBody segments!
       const crushHits = this.world.consumeCrushHits();
       if (crushHits.length > 0) {
+        this.unlockLore('ARSENAL_DAMAGE_MATRIX', true);
+        this.combatMusicHeat = Math.min(1, this.combatMusicHeat + 0.32);
+        rockMusic.triggerCombatAccent('COLLAPSE');
         const saboteurMul = this.hasPerk('STRUCTURAL_SABOTEUR') ? 2.0 : 1.0;
         const siegeLv = this.getRelicLevel('SIEGE_HEART');
         if (siegeLv > 0 && this.collapseHealCooldown <= 0) {
@@ -1165,12 +1470,18 @@ export class GameEngine {
     const p = this.player;
     if (p.bombs <= 0) return;
     p.bombs--;
+    if (this.state === 'PLAYING') {
+      this.unlockLore('DMG_EXPLOSIVE', false);
+    }
     const spd = 215;
     const muzzleX = p.x + Math.cos(p.aimAngle) * 6;
     const muzzleY = p.y - p.h * 0.5 + Math.sin(p.aimAngle) * 6;
 
     const siegeLv = this.getRelicLevel('SIEGE_HEART');
-    const demoBonus = (this.hasPerk('DEMOLITIONIST') ? 1.35 : 1.0) * (siegeLv > 0 ? 1 + 0.5 * siegeLv : 1.0);
+    const demoBonus =
+      (this.hasPerk('DEMOLITIONIST') ? 1.35 : 1.0) *
+      (siegeLv > 0 ? 1 + 0.5 * siegeLv : 1.0) *
+      this.clemencyBlastRadiusMul;
     const powerBonus = 3 * siegeLv;
     this.projectiles.push({
       id: this.nextId++,
@@ -1200,6 +1511,8 @@ export class GameEngine {
   private grantWeaponOrDupe(weaponId: WeaponId, fx: number, fy: number): void {
     const p = this.player;
     const wDef = WEAPONS[weaponId];
+    this.unlockLore(`WEAPON_${weaponId}`);
+    this.callbacks.onUnlockWeapon?.(weaponId);
     if (!p.weapons.includes(weaponId)) {
       if (p.weapons.length < 3) {
         p.weapons.push(weaponId);
@@ -1226,6 +1539,8 @@ export class GameEngine {
         const oldWeaponId = p.weapons[p.activeWeaponIdx];
         p.weapons[p.activeWeaponIdx] = pk.weaponId;
         const wDef = WEAPONS[pk.weaponId];
+        this.unlockLore(`WEAPON_${pk.weaponId}`);
+        this.callbacks.onUnlockWeapon?.(pk.weaponId);
         this.spawnFloatingText(p.x, p.y - p.h - 6, `Swapped for ${wDef.name}`, wDef.color);
 
         // Drop the old weapon back on the ground as a pickup
@@ -1266,6 +1581,13 @@ export class GameEngine {
             return;
           } else if (ped.id === 9993) {
             this.callbacks.onOpenSettingsModal?.();
+            return;
+          } else if (ped.id === 9994) {
+            this.callbacks.onOpenTomeModal?.();
+            return;
+          } else if (ped.id === 9995) {
+            this.unlockLore('NPC_BARNABY_VANCE', true);
+            this.callbacks.onOpenContrabandModal?.();
             return;
           }
         }
@@ -1339,11 +1661,13 @@ export class GameEngine {
 
     p.gold -= cost;
     this.forgeRerollCount++;
-    const allWeapons = Object.keys(WEAPONS) as WeaponId[];
-    const available = allWeapons.filter((id) => !p.weapons.includes(id));
+    const pool = this.unlockedWeaponPool.length > 0 ? this.unlockedWeaponPool : LOOTABLE_WEAPONS;
+    const available = pool.filter((id) => !p.weapons.includes(id));
     if (available.length > 0) {
       const nextW = available[(Math.random() * available.length) | 0];
       p.weapons[weaponIdx] = nextW;
+      this.unlockLore(`WEAPON_${nextW}`);
+      this.callbacks.onUnlockWeapon?.(nextW);
     }
     sfx.playPickup('upgrade');
     this.emitHud();
@@ -1357,6 +1681,10 @@ export class GameEngine {
 
     const wId = p.weapons[p.activeWeaponIdx];
     const wDef = WEAPONS[wId];
+    if (this.state === 'PLAYING') {
+      this.unlockLore(`WEAPON_${wId}`, false);
+      this.unlockLore(`DMG_${wDef.damageType}`, false);
+    }
     const dupes = p.weaponDupes[wId] ?? 0;
     const dupeMul = 1 + dupes * 0.0001; // +0.01% weapon stats per duplicate
 
@@ -1376,7 +1704,11 @@ export class GameEngine {
     const alchemistBonus = alchLv > 0 && wDef.acid ? 0.35 * alchLv : 0;
     const dmgMul = (1 + this.countPerk('TUNGSTEN_SLUGS') * 0.35 + goldBonus + alchemistBonus) * dupeMul;
     const extraPierce = this.countPerk('TUNGSTEN_SLUGS') + 2 * railLv;
-    const seismicMul = (1 + this.countPerk('SEISMIC_ROUNDS') * 0.65) * (siegeLv > 0 ? 1 + 0.5 * siegeLv : 1.0) * dupeMul;
+    const seismicMul =
+      (1 + this.countPerk('SEISMIC_ROUNDS') * 0.65) *
+      (siegeLv > 0 ? 1 + 0.5 * siegeLv : 1.0) *
+      this.clemencyBlastRadiusMul *
+      dupeMul;
     const powerBonus = 3 * siegeLv;
     const speedMul = (railLv > 0 ? 1.6 + 0.25 * (railLv - 1) : 1.0) * dupeMul;
     const ignite = wDef.ignite || this.hasPerk('THERMITE_PAYLOAD') || thermalLv > 0;
@@ -1389,10 +1721,14 @@ export class GameEngine {
 
     if (wDef.isBeam) {
       sfx.playShoot('beam');
+      const sunSiphonScale =
+        wId === 'SUN_SIPHON_LANCE' ? 1 + Math.min(1.6, Math.max(0, p.gold) / 180) : 1.0;
+      const beamBlastRad = wDef.blastRadius * seismicMul * sunSiphonScale;
+      const beamDamage = shotDamage * sunSiphonScale;
       let hitX = muzzleX;
       let hitY = muzzleY;
       const step = 1.5;
-      const maxDist = 88;
+      const maxDist = wId === 'SUN_SIPHON_LANCE' ? 108 : 88;
       const cos = Math.cos(p.aimAngle);
       const sin = Math.sin(p.aimAngle);
       let hitSomething = false;
@@ -1408,7 +1744,7 @@ export class GameEngine {
           this.world.isSolid(mRx, mRy) ||
           (this.state !== 'HUB_WORLD' && this.world.getMat(mRx, mRy) === Mat.CHAIN)
         ) {
-          this.world.destroyCircle(rx, ry, wDef.blastRadius * seismicMul, wDef.blastPower + powerBonus, wDef.damageType, ignite, acid);
+          this.world.destroyCircle(rx, ry, beamBlastRad, wDef.blastPower + powerBonus, wDef.damageType, ignite, acid);
           hitSomething = true;
           break;
         }
@@ -1416,9 +1752,9 @@ export class GameEngine {
           this.damageBossAtWorld(
             rx,
             ry,
-            wDef.blastRadius * seismicMul,
+            beamBlastRad,
             wDef.blastPower + powerBonus,
-            shotDamage,
+            beamDamage,
             wDef.damageType,
             ignite,
             true
@@ -1430,7 +1766,7 @@ export class GameEngine {
         for (let ei = this.enemies.length - 1; ei >= 0; ei--) {
           const en = this.enemies[ei];
           if (Math.abs(rx - en.x) <= en.w * 0.55 && Math.abs(ry - (en.y - en.h * 0.5)) <= en.h * 0.55) {
-            this.damageEnemy(en, shotDamage, false);
+            this.damageEnemy(en, beamDamage, false, wDef.damageType);
             hitSomething = true;
             break;
           }
@@ -1440,7 +1776,7 @@ export class GameEngine {
           for (const tgt of this.hubTargets) {
             if (tgt.hp <= 0) continue;
             if (Math.abs(rx - tgt.x) <= tgt.w * 0.55 && Math.abs(ry - (tgt.y - tgt.h * 0.5)) <= tgt.h * 0.55) {
-              this.damageHubTarget(tgt, shotDamage, rx, ry, wDef.color);
+              this.damageHubTarget(tgt, beamDamage, rx, ry, wDef.color);
               hitSomething = true;
               break;
             }
@@ -1463,24 +1799,36 @@ export class GameEngine {
         x1: hitX,
         y1: hitY,
         color: wDef.color,
-        life: 0.065,
+        life: wId === 'SUN_SIPHON_LANCE' ? 0.095 : 0.065,
       });
       return;
     }
 
     const soundMap: Record<WeaponId, 'pulse' | 'scatter' | 'flak' | 'rail' | 'arc' | 'acid' | 'beam'> = {
+      RIVET_PUNCHER: 'flak',
+      CINDER_BELLOWS: 'scatter',
       PULSE_CARBINE: 'pulse',
+      BRINE_SPRAYER: 'acid',
+      QUARRY_THUMPER: 'flak',
+      MINING_BEAM: 'beam',
       EMBER_SCATTER: 'scatter',
       FLAK_CANNON: 'flak',
-      PLASMA_RAIL: 'rail',
-      ARC_CASTER: 'arc',
-      ACID_MORTAR: 'acid',
-      MINING_BEAM: 'beam',
-      CRYOMANCER_BLASTER: 'pulse',
-      SONIC_REPEATER: 'arc',
-      VOID_SINGULARITY_GUN: 'rail',
+      SLAG_SLINGER: 'acid',
+      AETHER_SAW: 'beam',
+      RIME_HARPOON: 'rail',
+      RESONANCE_FORK: 'arc',
       HEAVY_CHAIN_MINIGUN: 'scatter',
+      ACID_MORTAR: 'acid',
+      ARC_CASTER: 'arc',
+      CRYOMANCER_BLASTER: 'pulse',
+      SUN_SIPHON_LANCE: 'beam',
+      OBLIVION_CHIME: 'rail',
+      TEMPEST_CHOIR: 'arc',
+      TECTONIC_RAM: 'flak',
+      SONIC_REPEATER: 'arc',
+      PLASMA_RAIL: 'rail',
       GRAVITON_CANNON: 'flak',
+      VOID_SINGULARITY_GUN: 'rail',
     };
     sfx.playShoot(soundMap[wId]);
 
@@ -1513,11 +1861,17 @@ export class GameEngine {
       );
     }
 
+    if (wId === 'TECTONIC_RAM') {
+      this.shakeMag = Math.max(this.shakeMag, 3.8);
+      this.spawnShockRing(muzzleX, muzzleY, 18, '#F43F5E');
+    }
+
     for (let i = 0; i < wDef.pellets; i++) {
       const ang = p.aimAngle + (Math.random() - 0.5) * wDef.spread;
       this.projectiles.push({
         id: this.nextId++,
         fromPlayer: true,
+        weaponId: wId,
         damageType: wDef.damageType,
         x: muzzleX,
         y: muzzleY,
@@ -1531,10 +1885,31 @@ export class GameEngine {
         ignite,
         acid,
         isBomb: false,
-        fuse: 0,
+        fuse: wId === 'OBLIVION_CHIME' ? 0.42 : 0,
         color: wDef.color,
-        radius: wId === 'FLAK_CANNON' || wId === 'ACID_MORTAR' || wId === 'GRAVITON_CANNON' ? 2.3 : wId === 'VOID_SINGULARITY_GUN' ? 2.8 : 1.5,
+        radius:
+          wId === 'FLAK_CANNON' ||
+          wId === 'ACID_MORTAR' ||
+          wId === 'GRAVITON_CANNON' ||
+          wId === 'QUARRY_THUMPER' ||
+          wId === 'SLAG_SLINGER' ||
+          wId === 'TECTONIC_RAM'
+            ? 2.4
+            : wId === 'VOID_SINGULARITY_GUN' || wId === 'OBLIVION_CHIME' || wId === 'TEMPEST_CHOIR'
+            ? 2.8
+            : 1.5,
         age: 0,
+        bouncesLeft: wId === 'AETHER_SAW' ? 4 : 0,
+        embedFuse: wId === 'RIVET_PUNCHER' ? 0.45 : undefined,
+        embedded: false,
+        spawnLava: wId === 'SLAG_SLINGER',
+        spawnBrine: wId === 'BRINE_SPRAYER',
+        harpoonPull: wId === 'RIME_HARPOON',
+        ballLightning: wId === 'TEMPEST_CHOIR',
+        zapTimer: wId === 'TEMPEST_CHOIR' ? 0.1 : undefined,
+        sonicCrumblePath: wId === 'RESONANCE_FORK' || wId === 'TECTONIC_RAM',
+        voidEraseImplode: wId === 'OBLIVION_CHIME',
+        knockbackMul: wId === 'QUARRY_THUMPER' ? 2.6 : wId === 'TECTONIC_RAM' ? 2.2 : undefined,
       });
     }
   }
@@ -1561,6 +1936,111 @@ export class GameEngine {
       if (pr.age > 5.0) {
         this.projectiles.splice(i, 1);
         continue;
+      }
+
+      if (pr.embedded && pr.embedFuse !== undefined) {
+        pr.embedFuse -= dt;
+        if (Math.random() < 0.65) {
+          this.spawnVfx(
+            pr.x,
+            pr.y,
+            (Math.random() - 0.5) * 36,
+            -25 - Math.random() * 25,
+            'SPARK',
+            '#FDBA74',
+            1.1,
+            0.16
+          );
+        }
+        if (pr.embedFuse <= 0) {
+          this.world.destroyCircle(pr.x, pr.y, pr.blastRadius, pr.blastPower, 'EXPLOSIVE', pr.ignite, pr.acid, true, true);
+          this.spawnShockRing(pr.x, pr.y, pr.blastRadius * 1.45, '#FB923C');
+          this.emitImpactBurst(pr.x, pr.y, '#FB923C', 10);
+          sfx.playExplosion(0.65);
+          for (let ei = this.enemies.length - 1; ei >= 0; ei--) {
+            const en = this.enemies[ei];
+            if (Math.hypot(en.x - pr.x, en.y - en.h * 0.5 - pr.y) <= pr.blastRadius + 10) {
+              this.damageEnemy(en, pr.damage, false, 'EXPLOSIVE');
+            }
+          }
+          if (this.state === 'HUB_WORLD') {
+            for (const tgt of this.hubTargets) {
+              if (tgt.hp > 0 && Math.hypot(tgt.x - pr.x, tgt.y - tgt.h * 0.5 - pr.y) <= pr.blastRadius + 10) {
+                this.damageHubTarget(tgt, pr.damage, pr.x, pr.y, '#FB923C');
+              }
+            }
+          }
+          this.projectiles.splice(i, 1);
+        }
+        continue;
+      }
+
+      // Oblivion Chime mid-air pause & implosive void terrain erasure
+      if (pr.voidEraseImplode) {
+        pr.fuse -= dt;
+        if (pr.fuse < 0.16) {
+          pr.vx *= 0.82;
+          pr.vy *= 0.82;
+        }
+        if (pr.fuse <= 0) {
+          this.world.pullLoosePixelsToward(pr.x, pr.y, 42);
+          this.world.destroyCircle(pr.x, pr.y, pr.blastRadius, pr.blastPower, 'VOID', false, false, true, true);
+          this.spawnShockRing(pr.x, pr.y, pr.blastRadius * 1.6, '#A78BFA');
+          this.emitImpactBurst(pr.x, pr.y, '#A78BFA', 14);
+          sfx.playExplosion(0.8);
+          for (let ei = this.enemies.length - 1; ei >= 0; ei--) {
+            const en = this.enemies[ei];
+            if (Math.hypot(en.x - pr.x, en.y - en.h * 0.5 - pr.y) <= pr.blastRadius + 14) {
+              this.damageEnemy(en, pr.damage, false, 'VOID');
+            }
+          }
+          this.projectiles.splice(i, 1);
+          continue;
+        }
+      }
+
+      // Tempest Choir drifting ball-lightning orb continuous arc tendrils
+      if (pr.ballLightning && pr.zapTimer !== undefined) {
+        pr.zapTimer -= dt;
+        if (pr.zapTimer <= 0) {
+          pr.zapTimer = 0.14;
+          const zapDmg = Math.max(6, Math.round(pr.damage * 0.45));
+          for (let ei = this.enemies.length - 1; ei >= 0; ei--) {
+            const en = this.enemies[ei];
+            if (Math.hypot(en.x - pr.x, en.y - en.h * 0.5 - pr.y) <= 68) {
+              this.damageEnemy(en, zapDmg, false, 'ARC');
+              this.beamFlashes.push({
+                x0: pr.x,
+                y0: pr.y,
+                x1: en.x,
+                y1: en.y - en.h * 0.5,
+                color: '#93C5FD',
+                life: 0.08,
+              });
+            }
+          }
+          if (this.state === 'HUB_WORLD') {
+            for (const tgt of this.hubTargets) {
+              if (tgt.hp > 0 && Math.hypot(tgt.x - pr.x, tgt.y - tgt.h * 0.5 - pr.y) <= 68) {
+                this.damageHubTarget(tgt, zapDmg, tgt.x, tgt.y - tgt.h * 0.5, '#93C5FD');
+                this.beamFlashes.push({
+                  x0: pr.x,
+                  y0: pr.y,
+                  x1: tgt.x,
+                  y1: tgt.y - tgt.h * 0.5,
+                  color: '#93C5FD',
+                  life: 0.08,
+                });
+              }
+            }
+          }
+          this.triggerArcConduction(pr.x, pr.y, zapDmg);
+        }
+      }
+
+      // Resonance Fork & Tectonic Ram harmonic vibration crumbling nearby stone/brick in flight
+      if (pr.sonicCrumblePath && Math.random() < 0.45) {
+        this.world.destroyCircle(pr.x, pr.y, 4.2, 5, 'SONIC', false, false, true, true);
       }
 
       pr.vy += pr.gravity * dt;
@@ -1598,6 +2078,22 @@ export class GameEngine {
           this.projectiles.splice(i, 1);
         }
         continue;
+      }
+
+      // Void Singularity gravitational pull along flight trajectory
+      if (pr.fromPlayer && pr.damageType === 'VOID') {
+        if (Math.random() < 0.55) {
+          this.world.pullLoosePixelsToward(pr.x, pr.y, 26);
+        }
+        for (const en of this.enemies) {
+          const vdx = pr.x - en.x;
+          const vdy = pr.y - (en.y - en.h * 0.5);
+          const vDist = Math.hypot(vdx, vdy);
+          if (vDist > 3 && vDist < 54) {
+            const pull = (1 - vDist / 54) * 165 * dt;
+            this.moveEntityWithPixelCollision(en, (vdx / vDist) * pull, (vdy / vDist) * pull, false);
+          }
+        }
       }
 
       // Projectile trail particles based on weapon damage type
@@ -1691,10 +2187,41 @@ export class GameEngine {
               Math.abs(pr.x - en.x) <= en.w * 0.55 + pr.radius &&
               Math.abs(pr.y - (en.y - en.h * 0.5)) <= en.h * 0.55 + pr.radius
             ) {
-              this.damageEnemy(en, pr.damage, false);
+              if (pr.embedFuse !== undefined && !pr.embedded) {
+                pr.embedded = true;
+                pr.vx = 0;
+                pr.vy = 0;
+                this.damageEnemy(en, Math.round(pr.damage * 0.35), false, 'KINETIC');
+                this.spawnFloatingText(en.x, en.y - en.h - 4, 'RIVETED!', '#FB923C');
+                break;
+              }
+              this.damageEnemy(en, pr.damage, false, pr.damageType);
+              if (pr.knockbackMul) {
+                en.vx += Math.sign(pr.vx || 1) * 95 * pr.knockbackMul;
+                en.vy = Math.min(en.vy, -55);
+              }
+              if (pr.harpoonPull && this.player) {
+                const pullDir = Math.sign(this.player.x - en.x);
+                en.vx = pullDir * 175;
+                en.vy = -90;
+                this.beamFlashes.push({
+                  x0: this.player.x,
+                  y0: this.player.y - 8,
+                  x1: en.x,
+                  y1: en.y - en.h * 0.5,
+                  color: '#22D3EE',
+                  life: 0.14,
+                });
+                this.spawnFloatingText(en.x, en.y - en.h - 10, 'YANKED!', '#22D3EE');
+              }
               this.emitImpactBurst(pr.x, pr.y, pr.color, pr.blastRadius >= 6 ? 10 : 5);
+              if (pr.damageType === 'VOID') {
+                this.world.pullLoosePixelsToward(pr.x, pr.y, 34);
+              } else if (pr.damageType === 'ARC') {
+                this.triggerArcConduction(pr.x, pr.y, pr.damage);
+              }
               if (pr.blastRadius >= 6) {
-                this.world.destroyCircle(pr.x, pr.y, pr.blastRadius, pr.blastPower, pr.damageType, pr.ignite, pr.acid);
+                this.world.destroyCircle(pr.x, pr.y, pr.blastRadius, pr.blastPower, pr.damageType, pr.ignite, pr.acid, true, pr.fromPlayer);
                 this.spawnShockRing(pr.x, pr.y, pr.blastRadius * 1.4, pr.color);
                 sfx.playExplosion(0.7);
               }
@@ -1707,13 +2234,21 @@ export class GameEngine {
             }
           }
 
-          if (!removed && this.state === 'HUB_WORLD') {
+          if (!removed && !pr.embedded && this.state === 'HUB_WORLD') {
             for (const tgt of this.hubTargets) {
               if (tgt.hp <= 0) continue;
               if (
                 Math.abs(pr.x - tgt.x) <= tgt.w * 0.55 + pr.radius &&
                 Math.abs(pr.y - (tgt.y - tgt.h * 0.5)) <= tgt.h * 0.55 + pr.radius
               ) {
+                if (pr.embedFuse !== undefined && !pr.embedded) {
+                  pr.embedded = true;
+                  pr.vx = 0;
+                  pr.vy = 0;
+                  this.damageHubTarget(tgt, Math.round(pr.damage * 0.35), pr.x, pr.y, '#FB923C');
+                  this.spawnFloatingText(tgt.x, tgt.y - tgt.h - 4, 'RIVETED!', '#FB923C');
+                  break;
+                }
                 this.damageHubTarget(tgt, pr.damage, pr.x, pr.y, pr.color);
                 this.emitImpactBurst(pr.x, pr.y, pr.color, pr.blastRadius >= 6 ? 10 : 5);
                 if (pr.blastRadius >= 6) {
@@ -1743,13 +2278,48 @@ export class GameEngine {
           }
         }
 
-        if (removed) break;
+        if (removed || pr.embedded) break;
 
         if (
           this.world.isSolid(ix, iy) ||
           (this.state !== 'HUB_WORLD' && this.world.getMat(ix, iy) === Mat.CHAIN)
         ) {
+          // Rivet Puncher embeds into brick/stone and pops 0.45s later
+          if (pr.embedFuse !== undefined && !pr.embedded) {
+            pr.embedded = true;
+            pr.vx = 0;
+            pr.vy = 0;
+            this.emitImpactBurst(pr.x, pr.y, '#FDBA74', 4);
+            break;
+          }
+
+          // Aether Sawblade ricochets off hard stone and metal up to 4 times
+          const hitMat = this.world.getMat(ix, iy);
+          if (
+            pr.bouncesLeft &&
+            pr.bouncesLeft > 0 &&
+            (hitMat === Mat.STONE || hitMat === Mat.METAL || hitMat === Mat.BRICK || hitMat === Mat.BEDROCK)
+          ) {
+            pr.bouncesLeft--;
+            this.world.destroyCircle(pr.x, pr.y, 2.4, pr.blastPower, pr.damageType, false, false, true, true);
+            const hitXWall = this.world.isSolid(Math.round(pr.x - sdx), iy) !== this.world.isSolid(ix, iy);
+            const hitYWall = this.world.isSolid(ix, Math.round(pr.y - sdy)) !== this.world.isSolid(ix, iy);
+            if (hitXWall) pr.vx = -pr.vx;
+            if (hitYWall) pr.vy = -pr.vy;
+            if (!hitXWall && !hitYWall) {
+              pr.vx = -pr.vx;
+              pr.vy = -pr.vy;
+            }
+            pr.x += Math.sign(pr.vx) * 2;
+            pr.y += Math.sign(pr.vy) * 2;
+            this.emitImpactBurst(pr.x, pr.y, '#38BDF8', 5);
+            break;
+          }
+
           const hitChainOnly = !this.world.isSolid(ix, iy);
+          if (pr.fromPlayer && pr.damageType === 'VOID') {
+            this.world.pullLoosePixelsToward(pr.x, pr.y, 34);
+          }
           this.world.destroyCircle(
             pr.x,
             pr.y,
@@ -1757,8 +2327,41 @@ export class GameEngine {
             pr.blastPower,
             pr.damageType,
             pr.ignite,
-            pr.acid
+            pr.acid,
+            true,
+            pr.fromPlayer
           );
+          if (pr.spawnLava && this.state !== 'HUB_WORLD') {
+            for (let k = 0; k < 3; k++) {
+              this.world.spawnParticle(
+                pr.x + (Math.random() - 0.5) * 4,
+                pr.y - 2,
+                (Math.random() - 0.5) * 42,
+                -25 - Math.random() * 25,
+                Mat.LAVA,
+                packColor(255, 110, 28),
+                1.6,
+                true
+              );
+            }
+          }
+          if (pr.spawnBrine) {
+            for (let k = 0; k < 4; k++) {
+              this.world.spawnParticle(
+                pr.x + (Math.random() - 0.5) * 5,
+                pr.y - 2,
+                (Math.random() - 0.5) * 45,
+                -20 - Math.random() * 20,
+                Mat.WATER,
+                packColor(56, 189, 248),
+                1.8,
+                true
+              );
+            }
+          }
+          if (pr.fromPlayer && pr.damageType === 'ARC') {
+            this.triggerArcConduction(pr.x, pr.y, pr.damage);
+          }
           this.emitImpactBurst(pr.x, pr.y, pr.color, pr.blastRadius >= 7 ? 14 : 5);
           const impactSpec = getAmmoLightSpec(pr.damageType, pr.color, false, pr.age, this.elapsedSeconds);
           this.spawnTransientLight(
@@ -1786,6 +2389,35 @@ export class GameEngine {
 
       if (removed) {
         this.projectiles.splice(i, 1);
+      }
+    }
+  }
+
+  private triggerArcConduction(cx: number, cy: number, baseDmg: number): void {
+    const res = this.world.conductArc(cx, cy, 44);
+    if (res.grounded) {
+      if (Math.random() < 0.35) {
+        this.spawnFloatingText(cx, cy - 6, 'GROUNDED', '#A8A29E');
+      }
+      return;
+    }
+    if (res.points.length === 0) return;
+
+    const shockDmg = Math.max(4, Math.round(baseDmg * 0.55));
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const en = this.enemies[i];
+      let shocked = false;
+      for (let p = 0; p < res.points.length; p++) {
+        const pt = res.points[p];
+        if (Math.abs(en.x - pt.x) <= en.w * 0.75 + 6 && Math.abs(en.y - pt.y) <= en.h + 6) {
+          shocked = true;
+          break;
+        }
+      }
+      if (shocked) {
+        this.damageEnemy(en, shockDmg, false, 'ARC');
+        this.spawnShockRing(en.x, en.y - en.h * 0.5, 14, '#A7F3D0');
+        this.spawnFloatingText(en.x, en.y - en.h - 8, 'ARC CONDUCT!', '#A7F3D0');
       }
     }
   }
@@ -1895,14 +2527,24 @@ export class GameEngine {
   private updateEnemies(dt: number): void {
     const p = this.player;
     const dmgScale = 1 + (this.depth - 1) * 0.12;
-    const spdScale = 1 + Math.min(0.65, (this.depth - 1) * 0.045);
-    const cdScale = Math.max(0.55, 1 - (this.depth - 1) * 0.03);
+    const baseSpdScale = 1 + Math.min(0.65, (this.depth - 1) * 0.045);
+    const baseCdScale = Math.max(0.55, 1 - (this.depth - 1) * 0.03);
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const en = this.enemies[i];
       en.hurtFlash = Math.max(0, en.hurtFlash - dt);
       en.attackCd = Math.max(0, en.attackCd - dt);
-      en.aiTimer += dt;
+      if (en.cryoTimer && en.cryoTimer > 0) {
+        en.cryoTimer = Math.max(0, en.cryoTimer - dt);
+      }
+      if (en.enrageTimer && en.enrageTimer > 0) {
+        en.enrageTimer = Math.max(0, en.enrageTimer - dt);
+      }
+      const isFrozen = (en.cryoTimer ?? 0) > 0;
+      const isEnraged = (en.enrageTimer ?? 0) > 0;
+      const spdScale = baseSpdScale * (isFrozen ? 0.42 : 1.0) * (isEnraged ? 1.42 : 1.0);
+      const cdScale = baseCdScale * (isFrozen ? 1.75 : 1.0) * (isEnraged ? 0.65 : 1.0);
+      en.aiTimer += dt * (isFrozen ? 0.45 : isEnraged ? 1.35 : 1.0);
 
       const dx = p.x - en.x;
       const dy = p.y - en.y;
@@ -2137,7 +2779,7 @@ export class GameEngine {
         }
         terrainHits++;
         if (terrainHits === 1) {
-          this.world.destroyCircle(rx, ry, blastRadius, 5, 'LASER', false, false);
+          this.world.destroyCircle(rx, ry, blastRadius, 5, 'LASER', false, false, true, false);
         }
         if (terrainHits >= 4) {
           endX = rx;
@@ -2160,10 +2802,22 @@ export class GameEngine {
     sfx.playShoot('rail');
   }
 
-  private damageEnemy(en: Enemy, dmg: number, fromCrush: boolean): void {
+  private damageEnemy(en: Enemy, dmg: number, fromCrush: boolean, damageType?: DamageType): void {
     const isArmored = en.kind === 'SENTINEL' || en.kind === 'STONE_WARDEN' || en.kind === 'TURRET';
     const railLv = this.getRelicLevel('RAIL_FOCUSER');
-    const finalDmg = !fromCrush && isArmored && railLv > 0 ? dmg * (1 + 0.45 * railLv) : dmg;
+    let finalDmg = !fromCrush && isArmored && railLv > 0 ? dmg * (1 + 0.45 * railLv) : dmg;
+
+    const wasFrozen = (en.cryoTimer ?? 0) > 0;
+    if (wasFrozen && (damageType === 'KINETIC' || damageType === 'EXPLOSIVE' || damageType === 'SONIC' || fromCrush)) {
+      finalDmg *= 1.5;
+    }
+    if (damageType === 'CRYOGENIC') {
+      en.cryoTimer = Math.max(en.cryoTimer ?? 0, 3.2);
+      if (!wasFrozen) {
+        this.spawnFloatingText(en.x, en.y - en.h - 8, 'FROZEN!', '#67E8F9');
+      }
+    }
+
     const dispDmg = Math.max(1, Math.round(finalDmg));
 
     en.hp -= finalDmg;
@@ -2171,8 +2825,8 @@ export class GameEngine {
     this.spawnFloatingText(
       en.x,
       en.y - en.h - 2,
-      fromCrush ? `CRUSH -${dispDmg}` : `${dispDmg}`,
-      fromCrush ? '#FBBF24' : '#F4F4F5'
+      fromCrush ? `CRUSH -${dispDmg}` : wasFrozen && finalDmg > dmg ? `SHATTER -${dispDmg}` : `${dispDmg}`,
+      fromCrush ? '#FBBF24' : wasFrozen && finalDmg > dmg ? '#67E8F9' : '#F4F4F5'
     );
 
     if (en.kind === 'SLIME' || en.kind === 'CRYSTAL_WISP') {
@@ -2201,6 +2855,7 @@ export class GameEngine {
       if (healAmt > 0) {
         this.player.hp = Math.min(this.player.maxHp, this.player.hp + healAmt);
       }
+      this.unlockLore(`ENEMY_${en.kind}`, true);
 
       // Burst of pixel sparks
       for (let k = 0; k < 14; k++) {
@@ -2246,7 +2901,8 @@ export class GameEngine {
       }
       const weaponDropChance = en.kind === 'STONE_WARDEN' || en.kind === 'SENTINEL' ? 0.22 : 0.05;
       if (Math.random() < weaponDropChance) {
-        const wId = LOOTABLE_WEAPONS[Math.floor(Math.random() * LOOTABLE_WEAPONS.length)];
+        const pool = this.unlockedWeaponPool.length > 0 ? this.unlockedWeaponPool : STARTER_UNLOCKED_WEAPONS;
+        const wId = pool[Math.floor(Math.random() * pool.length)];
         this.pickups.push({
           id: this.nextId++,
           kind: 'WEAPON',
@@ -3565,6 +4221,7 @@ export class GameEngine {
           const pOrigin = getBossOriginWorld(boss, region);
           this.spawnShockRing(pOrigin.x, pOrigin.y, 28, '#FACC15');
           this.spawnFloatingText(pOrigin.x, pOrigin.y - 8, getPartDisabledCallout(partKey, boss.parts), '#FACC15');
+          this.unlockLore('BOSS_MODULAR_ANATOMY', true);
 
           // Interrupt queued or active special if it relied on this destroyed module
           if (boss.pendingSpecialId) {
@@ -3651,6 +4308,24 @@ export class GameEngine {
 
     this.kills++;
     this.portal.active = true;
+    this.unlockLore('BOSS_MODULAR_ANATOMY', false);
+    this.unlockLore('LORE_RUNAWAY_ENGINE', false);
+    if (boss.biomeId === 'SUNKEN_MASONRY') {
+      this.unlockLore('BOSS_SUNKEN_COLOSSUS', true);
+    } else if (boss.biomeId === 'ASHEN_FOUNDRY') {
+      this.unlockLore('BOSS_FOUNDRY_JUGGERNAUT', true);
+    } else {
+      this.unlockLore('BOSS_VITRIOL_HARBINGER', true);
+    }
+
+    if (this.depth >= 30) {
+      this.unlockLore('LORE_ROYAL_CLEMENCY', true);
+      this.callbacks.onGrantClemency?.(this.depth, this.player.gold);
+      this.strataAlertText =
+        'DECREE OF ROYAL CLEMENCY GRANTED — Sovereign Spire Shattered at Depth 30! (+1 Sovereign Clemency Seal)';
+      this.strataAlertTimer = 7.0;
+      this.spawnFloatingText(boss.x, boss.y - boss.h - 22, 'ROYAL CLEMENCY EARNED! +1 SEAL', '#FACC15');
+    }
 
     this.spawnFloatingText(
       boss.x,
@@ -3684,7 +4359,8 @@ export class GameEngine {
         age: 0,
       });
     }
-    const dropWeaponId = LOOTABLE_WEAPONS[Math.floor(Math.random() * LOOTABLE_WEAPONS.length)];
+    const pool = this.unlockedWeaponPool.length > 0 ? this.unlockedWeaponPool : STARTER_UNLOCKED_WEAPONS;
+    const dropWeaponId = pool[Math.floor(Math.random() * pool.length)];
     this.pickups.push({
       id: this.nextId++,
       kind: 'WEAPON',
@@ -3832,12 +4508,18 @@ export class GameEngine {
 
       if (dist < 10) {
         if (pk.kind === 'GOLD') {
-          p.gold += pk.value;
+          p.gold += Math.max(1, Math.round(pk.value * this.clemencyGoldMul));
           sfx.playPickup('gold');
         } else if (pk.kind === 'HEALTH') {
           p.hp = Math.min(p.maxHp, p.hp + pk.value);
           this.spawnFloatingText(p.x, p.y - p.h - 3, `+${pk.value} HP`, '#10B981');
           sfx.playPickup('health');
+        } else if (pk.kind === 'LORE_PAGE') {
+          sfx.playPickup('upgrade');
+          this.spawnShockRing(pk.x, pk.y - 4, 20, '#38BDF8');
+          this.spawnTransientLight(pk.x, pk.y - 4, 52, [125, 211, 252], 1.1, 0.28, 0.38, false);
+          this.unlockNextWorldLorePage();
+          this.emitHud();
         } else if (pk.kind === 'WEAPON' && pk.weaponId) {
           const isHeld = p.weapons.includes(pk.weaponId);
           const isFull = p.weapons.length >= 2;
@@ -4249,6 +4931,9 @@ export class GameEngine {
             if (ped.id === 9991) nearInteractable = 'Press F to open Vault Upgrades';
             else if (ped.id === 9992) nearInteractable = 'Press F to open Expedition Staging';
             else if (ped.id === 9993) nearInteractable = 'Press F for Settings & Profiles';
+            else if (ped.id === 9994) nearInteractable = 'Press F to read Ancient Tome Glossary';
+            else if (ped.id === 9995)
+              nearInteractable = "Press F to inspect Vance's Contraband Workbench — Spend Gold to Unlock New Weapons";
             break;
           }
         }
@@ -4311,6 +4996,7 @@ export class GameEngine {
       nearInteractable,
       enemiesRemaining: this.enemies.length + (this.boss ? 1 : 0),
       bossAlert: this.boss ? `${this.boss.name} — ${this.boss.subtitle}` : null,
+      strataAlert: this.strataAlertTimer > 0 ? this.strataAlertText : null,
       boss: this.boss
         ? {
             name: this.boss.name,
@@ -4441,8 +5127,136 @@ export class GameEngine {
       }
     }
 
-    // 2. Relic Pedestals (stepped carved altar + beam + hovering artifact)
+    // 2. Relic Pedestals & Bastion Ancient Tome Lectern (id 9994)
     for (const ped of this.pedestals) {
+      if (ped.id === 9994) {
+        // Carved Stone Archive Lectern with Large Weathered Open Tome
+        const t = performance.now() * 0.004;
+        const px = ped.x;
+        const py = ped.y;
+
+        // Stepped stone lectern base & fluted pillar
+        this.ctx.fillStyle = '#1E293B';
+        this.ctx.fillRect(px - 8, py - 2, 16, 2);
+        this.ctx.fillStyle = '#334155';
+        this.ctx.fillRect(px - 6, py - 4, 12, 2);
+        this.ctx.fillStyle = '#475569';
+        this.ctx.fillRect(px - 4, py - 11, 8, 7);
+        this.ctx.fillStyle = '#64748B';
+        this.ctx.fillRect(px - 3, py - 11, 2, 7);
+        // Gold lectern trim band
+        this.ctx.fillStyle = '#D97706';
+        this.ctx.fillRect(px - 5, py - 12, 10, 1);
+        // Slanted oak & brass reading cradle
+        this.ctx.fillStyle = '#78350F';
+        this.ctx.fillRect(px - 8, py - 14, 16, 2);
+        this.ctx.fillStyle = '#F59E0B';
+        this.ctx.fillRect(px - 9, py - 14, 2, 2);
+        this.ctx.fillRect(px + 7, py - 14, 2, 2);
+
+        // Subtle upward scholar light aura above the open Tome
+        this.ctx.fillStyle = '#38BDF8';
+        this.ctx.globalAlpha = 0.14 + 0.06 * Math.sin(t * 1.3);
+        this.ctx.fillRect(px - 6, py - 27, 12, 12);
+        this.ctx.globalAlpha = 1;
+
+        // Large, Old Leather-Bound Tome resting open on the pedestal cradle
+        this.ctx.fillStyle = '#451A03';
+        this.ctx.fillRect(px - 8, py - 18, 16, 5);
+        this.ctx.fillStyle = '#78350F';
+        this.ctx.fillRect(px - 7, py - 19, 14, 5);
+        // Brass/Gold corner bindings & central spine clasp
+        this.ctx.fillStyle = '#F59E0B';
+        this.ctx.fillRect(px - 8, py - 18, 2, 2);
+        this.ctx.fillRect(px + 6, py - 18, 2, 2);
+        this.ctx.fillRect(px - 1, py - 14, 2, 3);
+        // Left & Right Thick Aged Parchment Pages (open folio spread)
+        this.ctx.fillStyle = '#FEF3C7';
+        this.ctx.fillRect(px - 6, py - 19, 6, 4);
+        this.ctx.fillStyle = '#FDE68A';
+        this.ctx.fillRect(px + 1, py - 19, 5, 4);
+        // Center spine crease
+        this.ctx.fillStyle = '#92400E';
+        this.ctx.fillRect(px, py - 19, 1, 4);
+        // Tiny inscribed pixel script lines & illuminated cyan rune on open pages
+        this.ctx.fillStyle = '#78350F';
+        this.ctx.fillRect(px - 5, py - 18, 4, 1);
+        this.ctx.fillRect(px - 5, py - 16, 3, 1);
+        this.ctx.fillRect(px + 2, py - 16, 3, 1);
+        this.ctx.fillStyle = '#38BDF8';
+        this.ctx.fillRect(px + 2, py - 18, 2, 1);
+        // Hanging crimson & gold bookmark ribbon
+        this.ctx.fillStyle = '#DC2626';
+        this.ctx.fillRect(px + 2, py - 14, 2, 4);
+        this.ctx.fillStyle = '#FACC15';
+        this.ctx.fillRect(px + 2, py - 10, 2, 1);
+
+        if (this.state === 'HUB_WORLD') {
+          this.ctx.font = 'bold 5px "JetBrains Mono", monospace';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillStyle = '#BAE6FD';
+          this.ctx.fillText('Tome Glossary', px, py - 24);
+        }
+        continue;
+      }
+
+      if (ped.id === 9995) {
+        // Vance's Contraband Workbench: soot-blackened iron & timber bench piled with brass casings, cracked Vaelic prism & schematics
+        const t = performance.now() * 0.005;
+        const px = ped.x;
+        const py = ped.y;
+
+        // Heavy soot-blackened iron legs & lower tool shelf
+        this.ctx.fillStyle = '#0F172A';
+        this.ctx.fillRect(px - 10, py - 9, 3, 9);
+        this.ctx.fillRect(px + 7, py - 9, 3, 9);
+        this.ctx.fillStyle = '#1E293B';
+        this.ctx.fillRect(px - 8, py - 4, 16, 2);
+
+        // Heavy scorched oak & riveted steel workbench tabletop
+        this.ctx.fillStyle = '#451A03';
+        this.ctx.fillRect(px - 11, py - 11, 22, 3);
+        this.ctx.fillStyle = '#78350F';
+        this.ctx.fillRect(px - 10, py - 12, 20, 2);
+        this.ctx.fillStyle = '#64748B';
+        this.ctx.fillRect(px - 11, py - 12, 2, 2);
+        this.ctx.fillRect(px + 9, py - 12, 2, 2);
+
+        // Warm golden-cyan contraband aura above workbench
+        this.ctx.fillStyle = '#F59E0B';
+        this.ctx.globalAlpha = 0.14 + 0.07 * Math.sin(t * 1.4);
+        this.ctx.fillRect(px - 8, py - 25, 16, 13);
+        this.ctx.globalAlpha = 1;
+
+        // Stacked brass shell casings on left of bench
+        this.ctx.fillStyle = '#D97706';
+        this.ctx.fillRect(px - 8, py - 15, 5, 3);
+        this.ctx.fillStyle = '#FACC15';
+        this.ctx.fillRect(px - 7, py - 16, 3, 2);
+
+        // Cracked glowing Vaelic prism core mounted in center clamp
+        this.ctx.fillStyle = '#334155';
+        this.ctx.fillRect(px - 2, py - 14, 5, 2);
+        this.ctx.fillStyle = '#38BDF8';
+        this.ctx.fillRect(px - 1, py - 17, 3, 3);
+        this.ctx.fillStyle = '#E0F2FE';
+        this.ctx.fillRect(px, py - 16, 1, 2);
+
+        // Confiscated cyan blueprint scroll on right of bench
+        this.ctx.fillStyle = '#1E3A8A';
+        this.ctx.fillRect(px + 4, py - 14, 5, 2);
+        this.ctx.fillStyle = '#60A5FA';
+        this.ctx.fillRect(px + 5, py - 14, 3, 1);
+
+        if (this.state === 'HUB_WORLD') {
+          this.ctx.font = 'bold 5px "JetBrains Mono", monospace';
+          this.ctx.textAlign = 'center';
+          this.ctx.fillStyle = '#FCD34D';
+          this.ctx.fillText('Contraband Bench', px, py - 24);
+        }
+        continue;
+      }
+
       this.ctx.fillStyle = '#1E293B';
       this.ctx.fillRect(ped.x - 7, ped.y - 3, 14, 3);
       this.ctx.fillStyle = '#475569';
@@ -4493,7 +5307,7 @@ export class GameEngine {
       }
     }
 
-    // 3. Pickups (faceted gold nuggets, glowing med-capsules, aura-framed weapons)
+    // 3. Pickups (faceted gold nuggets, glowing med-capsules, aura-framed weapons, ancient lore pages)
     for (const pk of this.pickups) {
       const t = performance.now() * 0.007 + pk.id;
       if (pk.kind === 'GOLD') {
@@ -4509,6 +5323,30 @@ export class GameEngine {
           this.ctx.fillStyle = '#FEF9C3';
           this.ctx.fillRect(gx - 1, gy, 1, 1);
         }
+      } else if (pk.kind === 'LORE_PAGE') {
+        const bob = Math.sin(t * 0.9) * 1.4;
+        const lx = Math.round(pk.x);
+        const ly = Math.round(pk.y - 5 + bob);
+        // Soft scholar cyan-amber glow halo
+        this.ctx.globalAlpha = 0.24 + 0.1 * Math.sin(t * 1.4);
+        this.ctx.fillStyle = '#38BDF8';
+        this.ctx.beginPath();
+        this.ctx.arc(lx, ly, 6.5, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.globalAlpha = 1;
+
+        // Aged parchment folio page with dark leather border, rune script & wax seal
+        this.ctx.fillStyle = '#451A03';
+        this.ctx.fillRect(lx - 4, ly - 5, 8, 9);
+        this.ctx.fillStyle = '#FEF3C7';
+        this.ctx.fillRect(lx - 3, ly - 4, 6, 7);
+        this.ctx.fillStyle = '#FDE68A';
+        this.ctx.fillRect(lx + 1, ly - 4, 2, 2); // folded parchment corner
+        this.ctx.fillStyle = '#92400E';
+        this.ctx.fillRect(lx - 2, ly - 2, 4, 1);
+        this.ctx.fillRect(lx - 2, ly, 3, 1);
+        this.ctx.fillStyle = '#38BDF8';
+        this.ctx.fillRect(lx + 1, ly + 1, 2, 2); // glowing rune seal
       } else if (pk.kind === 'WEAPON' && pk.weaponId) {
         const wCol = WEAPONS[pk.weaponId].color;
         const bob = Math.sin(t) * 1.4;
@@ -4779,18 +5617,56 @@ export class GameEngine {
 
   private interactWithHubNpc(npc: HubNpc): void {
     if (npc.greetCooldown > 0) return;
-    npc.greetCooldown = 1.8;
-    const quietLines = [
-      '...',
-      'The archive slumbers still.',
-      'Every fracture leaves a record.',
-      'Speak with me when the chronicle opens.',
-    ];
-    const line = quietLines[this.archivistLineIdx % quietLines.length];
+    npc.greetCooldown = 1.4;
+
+    if (npc.id === 'VANCE') {
+      this.unlockLore('NPC_BARNABY_VANCE', true);
+      const allUnlocked = this.unlockedWeaponPool.length >= Object.keys(WEAPONS).length;
+      const pool = allUnlocked ? VANCE_DIALOGUE.maxedOut : VANCE_DIALOGUE.greetings;
+      const bark = pool[this.vanceLineIdx % pool.length];
+      this.vanceLineIdx++;
+      sfx.playPickup('gold');
+      this.spawnShockRing(npc.x + npc.facing * 5, npc.y - 9, 18, '#F59E0B');
+      this.spawnFloatingText(npc.x, npc.y - 24, 'Show me the sun-mint!', '#FCD34D');
+      this.strataAlertText = `Master-Factor Barnaby Vance: "${bark}"`;
+      this.strataAlertTimer = 5.8;
+      this.emitHud();
+      return;
+    }
+
+    const totalPages = LORE_CATALOG.length;
+    const unlockedCount = this.unlockedLoreSet.size;
+    const newestDef = this.lastUnlockedLoreId ? LORE_CATALOG_MAP[this.lastUnlockedLoreId] : null;
+    const missingPages = LORE_CATALOG.filter((p) => !this.unlockedLoreSet.has(p.id));
+    const nextMissing =
+      missingPages.find((p) => p.category === 'WORLD_STRATA') ?? missingPages[0] ?? null;
+
+    let shortFloating = 'Inspect the Tome beside me.';
+    let fullBanner =
+      'Archivist: "The Ancient Tome upon this pedestal holds our Fractured Annals. Descend into the strata to recover lost pages and record your discoveries."';
+
+    if (unlockedCount === 0) {
+      if (this.archivistLineIdx % 2 === 1 && nextMissing) {
+        shortFloating = `Hint: ${nextMissing.title}`;
+        fullBanner = `Archivist: "To bind your first page (${nextMissing.title}): ${nextMissing.unlockHint}"`;
+      } else {
+        shortFloating = 'The Tome awaits your discoveries.';
+      }
+    } else if (newestDef && (this.archivistLineIdx % 2 === 0 || !nextMissing)) {
+      shortFloating = `On: ${newestDef.title}`;
+      fullBanner = newestDef.archivistRemark;
+    } else if (nextMissing) {
+      shortFloating = `${unlockedCount}/${totalPages} Pages Bound`;
+      fullBanner = `Archivist: "You have bound ${unlockedCount} of ${totalPages} pages into the Tome. Next, seek '${nextMissing.title}' — ${nextMissing.unlockHint}"`;
+    }
+
     this.archivistLineIdx++;
     sfx.playPickup('upgrade');
-    this.spawnShockRing(npc.x + npc.facing * 5, npc.y - 9, 16, '#7DD3FC');
-    this.spawnFloatingText(npc.x, npc.y - 24, line, '#BAE6FD');
+    this.spawnShockRing(npc.x + npc.facing * 5, npc.y - 9, 18, '#7DD3FC');
+    this.spawnFloatingText(npc.x, npc.y - 24, shortFloating, '#BAE6FD');
+    this.strataAlertText = fullBanner;
+    this.strataAlertTimer = 5.6;
+    this.emitHud();
   }
 
   private damageHubTarget(tgt: HubTarget, rawDmg: number, hx: number, hy: number, color: string): void {
@@ -5122,6 +5998,60 @@ export class GameEngine {
     // Grounded soft shadow
     ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
     ctx.fillRect(x - 5, y - 1, 10, 2);
+
+    if (npc.id === 'VANCE') {
+      // Master-Factor Barnaby Vance: soot-stained royal engineer's apron, welding goggles on forehead, heavy wrench
+      // Heavy work boots & dark charcoal trousers
+      ctx.fillStyle = '#09090B';
+      ctx.fillRect(x - 3, y - 4, 2, 4);
+      ctx.fillRect(x + 1, y - 4, 2, 4);
+      // Soot-stained royal engineer's leather apron over brass-buttoned tunic
+      ctx.fillStyle = '#1E293B';
+      ctx.fillRect(x - 4, y - 12, 8, 8);
+      ctx.fillStyle = '#78350F';
+      ctx.fillRect(x - 3, y - 11, 6, 8);
+      ctx.fillStyle = '#92400E';
+      ctx.fillRect(x - 2, y - 10, 4, 6);
+      // Tarnished brass apron buckle & pocket casings
+      ctx.fillStyle = '#F59E0B';
+      ctx.fillRect(x - 2, y - 11, 1, 1);
+      ctx.fillRect(x + 1, y - 11, 1, 1);
+      ctx.fillRect(x - 1, y - 6, 2, 1);
+
+      // Head & grinning grease-smudged face
+      ctx.fillStyle = '#D97706';
+      ctx.fillRect(x - 2, y - 16, 5, 4);
+      ctx.fillStyle = '#09090B';
+      ctx.fillRect(f > 0 ? x + 1 : x - 1, y - 15, 1, 1);
+
+      // Heavy brass welding goggles pushed up on forehead with cyan Vaelic lenses
+      ctx.fillStyle = '#451A03';
+      ctx.fillRect(x - 3, y - 18, 7, 2);
+      ctx.fillStyle = '#F59E0B';
+      ctx.fillRect(x - 2, y - 18, 2, 2);
+      ctx.fillRect(x + 1, y - 18, 2, 2);
+      ctx.fillStyle = '#38BDF8';
+      ctx.fillRect(x - 1, y - 18, 1, 1);
+      ctx.fillRect(x + 2, y - 18, 1, 1);
+
+      // Heavy iron siege-wrench held in hand, bobbing slightly
+      const wx = x + f * 5;
+      const wy = Math.round(y - 12 + hover);
+      ctx.fillStyle = '#94A3B8';
+      ctx.fillRect(wx, wy - 4, 2, 8);
+      ctx.fillStyle = '#CBD5E1';
+      ctx.fillRect(wx - 1, wy - 6, 4, 2);
+      ctx.fillRect(wx - 1, wy - 7, 1, 1);
+      ctx.fillRect(wx + 2, wy - 7, 1, 1);
+
+      if (this.player && Math.hypot(this.player.x - npc.x, this.player.y - npc.y) < 46) {
+        ctx.font = 'bold 5px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#FCD34D';
+        ctx.fillText('Barnaby Vance', x, y - 21);
+      }
+      return;
+    }
 
     // Flowing scholar robes (deep slate-indigo with tarnished gold trim)
     ctx.fillStyle = '#0F172A';
@@ -6013,11 +6943,30 @@ export class GameEngine {
       ctx.fillRect(ex + 2 + step, ey - 2, 2, 2);
     }
 
+    if ((en.cryoTimer ?? 0) > 0) {
+      ctx.fillStyle = 'rgba(103, 232, 249, 0.38)';
+      ctx.fillRect(ex - Math.ceil(en.w * 0.5), ey - en.h, en.w, en.h);
+      ctx.strokeStyle = '#67E8F9';
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(ex - Math.ceil(en.w * 0.5) - 0.5, ey - en.h - 0.5, en.w + 1, en.h + 1);
+    }
+
+    if ((en.enrageTimer ?? 0) > 0) {
+      const pulse = 0.55 + 0.35 * Math.sin(t * 2.5);
+      ctx.strokeStyle = `rgba(250, 204, 21, ${pulse.toFixed(2)})`;
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.arc(ex, ey - en.h * 0.5, Math.max(en.w, en.h) * 0.65, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#FACC15';
+      ctx.fillRect(ex - 1, ey - en.h - 3, 2, 2);
+    }
+
     if (en.hp < en.maxHp) {
       const pct = Math.max(0, en.hp / en.maxHp);
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.fillRect(ex - 5, ey - en.h - 5, 10, 2);
-      ctx.fillStyle = '#EF4444';
+      ctx.fillStyle = (en.cryoTimer ?? 0) > 0 ? '#38BDF8' : (en.enrageTimer ?? 0) > 0 ? '#FACC15' : '#EF4444';
       ctx.fillRect(ex - 5, ey - en.h - 5, Math.round(10 * pct), 2);
     }
   }

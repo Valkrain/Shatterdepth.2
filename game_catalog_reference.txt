@@ -1,202 +1,346 @@
-GUNS (12)
+WEAPONS / GUNS (24 — ORGANIZED BY TIER)
 ================================================================================
-1. Pulse Carbine (PULSE_CARBINE)
+Starter Loadout Rule: Players select 2 of the 3 Default Starter Weapons (Rivet Puncher,
+Cinder Bellows, Pulse Carbine) at the Expedition Portal Staging screen to begin a run.
+All remaining 21 weapons are unsealed using Vaelic Gold at Master-Factor Barnaby Vance's
+Contraband Workbench in the Bastion Hub.
+
+TIER I — CROWN EXCHEQUERY PENAL SURPLUS (8 WEAPONS: 3 STARTERS + 5 UNLOCKS)
+--------------------------------------------------------------------------------
+1. Rivet Puncher (RIVET_PUNCHER) [DEFAULT STARTER — 0g]
+   - Damage Type: Piercing
+   - Damage: 18 | Cooldown: 0.28s | Pellets: 1 | Speed: 460 | Spread: 0.02
+   - Blast Radius: 3.0 | Blast Power: 5 | Pierce: 2 | Gravity: 18
+   - Description: Heavy pneumatic spike driver that punches deep holes through dirt, timber, and light masonry.
+   - Quote: "Standard Exchequery riveted steel. Point away from anything you intend to keep attached."
+
+2. Cinder Bellows (CINDER_BELLOWS) [DEFAULT STARTER — 0g]
+   - Damage Type: Thermal
+   - Damage: 7 x 3 pellets | Cooldown: 0.16s | Speed: 230 | Spread: 0.28
+   - Blast Radius: 3.2 | Blast Power: 2 | Pierce: 1 | Gravity: -35 | Ignites: Yes
+   - Description: Short-range forge-bellows belching drifting embers that incinerate moss, wood, and oil vats.
+   - Quote: "Originally issued for clearing damprot out of timber shoring. Works equally well on things with legs."
+
+3. Pulse Carbine (PULSE_CARBINE) [DEFAULT STARTER — 0g]
    - Damage Type: Kinetic
    - Damage: 14 | Cooldown: 0.14s | Pellets: 1 | Speed: 380 | Spread: 0.04
    - Blast Radius: 3.2 | Blast Power: 3 | Pierce: 0 | Gravity: 25
    - Description: Rapid kinetic bolts that shred wood, dirt, and jars; deflects off heavy metal.
+   - Quote: "Cheap, loud, and jams only on days ending in blood. Aim for the mortar, not the iron."
 
-2. Ember Scattergun (EMBER_SCATTER)
-   - Damage Type: Thermal
-   - Damage: 9 x 5 pellets | Cooldown: 0.42s | Speed: 310 | Spread: 0.24
-   - Blast Radius: 2.8 | Blast Power: 2 | Pierce: 0 | Gravity: 60 | Ignites: Yes
-   - Description: Five-pellet thermal burst that chars timber, moss, and oil vats; weak vs stone.
-
-3. Flak Cannon (FLAK_CANNON)
-   - Damage Type: Explosive
-   - Damage: 32 | Cooldown: 0.56s | Pellets: 1 | Speed: 260 | Spread: 0.05
-   - Blast Radius: 11.0 | Blast Power: 6 | Pierce: 0 | Gravity: 160
-   - Description: Heavy explosive shells built to shatter brick, stone pillars, and crystal.
-
-4. Plasma Railgun (PLASMA_RAIL)
-   - Damage Type: Plasma
-   - Damage: 44 | Cooldown: 0.65s | Pellets: 1 | Speed: 540 | Spread: 0.01
-   - Blast Radius: 4.5 | Blast Power: 8 | Pierce: 5 | Gravity: 0 | Ignites: Yes
-   - Description: Superheated piercing slug that bores cleanly through stone, brick, and metal.
-
-5. Arc Caster (ARC_CASTER)
-   - Damage Type: Arc
-   - Damage: 16 x 2 pellets | Cooldown: 0.24s | Speed: 410 | Spread: 0.09
-   - Blast Radius: 4.0 | Blast Power: 4 | Pierce: 1 | Gravity: 0
-   - Description: Twin arc bolts that shatter crystal and fry metal chains; insulated by dirt and wood.
-
-6. Vitriol Mortar (ACID_MORTAR)
+4. Brine Sprayer (BRINE_SPRAYER) [UNLOCK COST: 80g]
    - Damage Type: Corrosive
-   - Damage: 24 | Cooldown: 0.48s | Pellets: 1 | Speed: 230 | Spread: 0.06
-   - Blast Radius: 8.0 | Blast Power: 4 | Pierce: 0 | Gravity: 230 | Acid Splash: Yes
-   - Description: Corrosive shells that dissolve metal plates and masonry; crystal and gold resist acid.
+   - Damage: 6 x 3 pellets | Cooldown: 0.14s | Speed: 260 | Spread: 0.22
+   - Blast Radius: 3.5 | Blast Power: 2 | Pierce: 0 | Gravity: 180 | Spawns Water/Acid Brine: Yes
+   - Description: Pressurized bilge pump jetting conductive salt-brine and weak acid that cools lava and primes Arc lines.
+   - Quote: "Pumped straight from the Stratum I sump-tanks. Do not drink, inhale, or allow near open wounds."
 
-7. Cutter Beam (MINING_BEAM)
+5. Quarry Thumper (QUARRY_THUMPER) [UNLOCK COST: 90g]
+   - Damage Type: Explosive
+   - Damage: 36 | Cooldown: 0.62s | Pellets: 1 | Speed: 250 | Spread: 0.04
+   - Blast Radius: 12.5 | Blast Power: 7 | Pierce: 0 | Gravity: 190 | Delayed Embed Fuse: 0.75s
+   - Description: Lobbed blasting spike that embeds into stone walls or floors before detonating on a short fuse.
+   - Quote: "Stick it in a load-bearing seam, count to one, and admire the new skylight."
+
+6. Cutter Beam (MINING_BEAM) [UNLOCK COST: 95g]
    - Damage Type: Laser
    - Damage: 5 (Continuous Beam) | Cooldown: 0.06s | Speed: 460 | Spread: 0.01
    - Blast Radius: 3.4 | Blast Power: 7 | Pierce: 0 | Gravity: 0
    - Description: Precision laser cutter effective across stone, crystal, brick, and timber.
+   - Quote: "Standard-issue Aether-Wright excavation needle. Do not stare into aperture with remaining eye."
 
-8. Cryo Blaster (CRYOMANCER_BLASTER)
-   - Damage Type: Cryogenic
-   - Damage: 18 | Cooldown: 0.18s | Pellets: 1 | Speed: 420 | Spread: 0.02
-   - Blast Radius: 4.2 | Blast Power: 4 | Pierce: 1 | Gravity: 0
-   - Description: Frigid energy bolts that brittle stone and freeze targets solid.
+7. Ember Scattergun (EMBER_SCATTER) [UNLOCK COST: 105g]
+   - Damage Type: Thermal
+   - Damage: 9 x 5 pellets | Cooldown: 0.42s | Speed: 310 | Spread: 0.24
+   - Blast Radius: 2.8 | Blast Power: 2 | Pierce: 0 | Gravity: 60 | Ignites: Yes
+   - Description: Five-pellet thermal burst that chars timber, moss, and oil vats; weak vs stone.
+   - Quote: "Clears damprot, spider-nests, and wooden scaffolding in one sneeze. Mind the oil barrels."
 
-9. Sonic Repeater (SONIC_REPEATER)
-   - Damage Type: Sonic
-   - Damage: 12 | Cooldown: 0.12s | Pellets: 1 | Speed: 500 | Spread: 0.03
-   - Blast Radius: 6.0 | Blast Power: 5 | Pierce: 2 | Gravity: 0
-   - Description: Vibrational pulse rifle that shakes brick and stone foundations loose instantly.
+8. Flak Cannon (FLAK_CANNON) [UNLOCK COST: 115g]
+   - Damage Type: Explosive
+   - Damage: 32 | Cooldown: 0.56s | Pellets: 1 | Speed: 260 | Spread: 0.05
+   - Blast Radius: 11.0 | Blast Power: 6 | Pierce: 0 | Gravity: 160
+   - Description: Heavy explosive shells built to shatter brick, stone pillars, and crystal.
+   - Quote: "Why unlock a door when you can delete the wall it was hanging on?"
 
-10. Void Singularity (VOID_SINGULARITY_GUN)
-    - Damage Type: Void
-    - Damage: 55 | Cooldown: 0.75s | Pellets: 1 | Speed: 280 | Spread: 0.01
-    - Blast Radius: 14.0 | Blast Power: 9 | Pierce: 4 | Gravity: 10
-    - Description: Fires microscopic black holes that pull in nearby pixels, debris, and enemies.
+TIER II — BARNABY VANCE'S CONTRABAND PROTOTYPES (8 WEAPONS)
+--------------------------------------------------------------------------------
+9. Slag Slinger (SLAG_SLINGER) [UNLOCK COST: 150g]
+   - Damage Type: Thermal
+   - Damage: 26 | Cooldown: 0.52s | Pellets: 1 | Speed: 245 | Spread: 0.06
+   - Blast Radius: 7.5 | Blast Power: 5 | Pierce: 0 | Gravity: 220 | Ignites & Spawns Molten Lava: Yes
+   - Description: Hurls crucibles of molten foundry slag that splatter into real burning lava pixels on impact.
+   - Quote: "Vance lined the barrel with stolen kiln-brick. Every trigger pull leaves a puddle of the Foundry behind."
 
-11. Chain Minigun (HEAVY_CHAIN_MINIGUN)
+10. Aether Sawblade (AETHER_SAWBLADE) [UNLOCK COST: 165g]
+    - Damage Type: Piercing
+    - Damage: 22 | Cooldown: 0.34s | Pellets: 1 | Speed: 440 | Spread: 0.02
+    - Blast Radius: 4.2 | Blast Power: 6 | Pierce: 2 | Gravity: 15 | Ricochet Bounces: 3
+    - Description: High-RPM buzzsaw disc that carves through soft earth and ricochets violently off hard stone and metal.
+    - Quote: "In a tight masonry corridor, it hits the target three times and the shooter once. Duck."
+
+11. Chain Minigun (HEAVY_CHAIN_MINIGUN) [UNLOCK COST: 170g]
     - Damage Type: Kinetic
     - Damage: 7 | Cooldown: 0.05s | Pellets: 1 | Speed: 520 | Spread: 0.08
     - Blast Radius: 2.5 | Blast Power: 2 | Pierce: 0 | Gravity: 30
     - Description: Sustained high-rate kinetic lead shredder for rapid excavation.
+    - Quote: "Accuracy by volume. If the cavern doesn't collapse, you aren't holding the trigger long enough."
 
-12. Graviton Cannon (GRAVITON_CANNON)
+12. Rime Harpoon (RIME_HARPOON) [UNLOCK COST: 180g]
+    - Damage Type: Cryogenic
+    - Damage: 30 | Cooldown: 0.54s | Pellets: 1 | Speed: 490 | Spread: 0.01
+    - Blast Radius: 5.5 | Blast Power: 6 | Pierce: 1 | Gravity: 10 | Cryo Tether Pull: Yes
+    - Description: Flash-freezing lance that anchors into targets, deep-freezes them solid, and yanks them off ledges.
+    - Quote: "Freeze the stone, yank the warden onto the brittle floor, let gravity file the paperwork."
+
+13. Vitriol Mortar (ACID_MORTAR) [UNLOCK COST: 185g]
+    - Damage Type: Corrosive
+    - Damage: 24 | Cooldown: 0.48s | Pellets: 1 | Speed: 230 | Spread: 0.06
+    - Blast Radius: 8.0 | Blast Power: 4 | Pierce: 0 | Gravity: 230 | Acid Splash: Yes
+    - Description: Corrosive shells that dissolve metal plates and masonry; crystal and gold resist acid.
+    - Quote: "Eats iron bulkheads like spring parchment. Leaves the gold behind—convenient for the Crown."
+
+14. Resonance Fork (RESONANCE_FORK) [UNLOCK COST: 195g]
+    - Damage Type: Sonic
+    - Damage: 6 (Continuous Sonic Beam) | Cooldown: 0.07s | Speed: 480 | Spread: 0.02
+    - Blast Radius: 5.2 | Blast Power: 7 | Pierce: 0 | Gravity: 0 | Structural Crumble Beam: Yes
+    - Description: Continuous acoustic tuning beam that vibrates masonry seams until intact overhead ceilings shear loose.
+    - Quote: "Tuned to the exact resonant frequency of Vaelic limestone mortar. Wear ear-wax."
+
+15. Arc Caster (ARC_CASTER) [UNLOCK COST: 210g]
+    - Damage Type: Arc
+    - Damage: 16 x 2 pellets | Cooldown: 0.24s | Speed: 410 | Spread: 0.09
+    - Blast Radius: 4.0 | Blast Power: 4 | Pierce: 1 | Gravity: 0
+    - Description: Twin arc bolts that shatter crystal and fry metal chains; insulated by dirt and wood.
+    - Quote: "Drop one bolt into a flooded trench and watch every construct in the room dance the jig."
+
+16. Cryo Blaster (CRYOMANCER_BLASTER) [UNLOCK COST: 230g]
+    - Damage Type: Cryogenic
+    - Damage: 18 | Cooldown: 0.18s | Pellets: 1 | Speed: 420 | Spread: 0.02
+    - Blast Radius: 4.2 | Blast Power: 4 | Pierce: 1 | Gravity: 0
+    - Description: Frigid energy bolts that brittle stone and freeze targets solid.
+    - Quote: "Cools magma to walkable crust in two shots. Also turns Crawlers into very decorative ice sculptures."
+
+TIER III — FORBIDDEN VAELIC RELICS (8 WEAPONS)
+--------------------------------------------------------------------------------
+17. Sun-Siphon Lance (SUN_SIPHON_LANCE) [UNLOCK COST: 290g]
+    - Damage Type: Plasma
+    - Damage: 9 (Continuous Solar Beam) | Cooldown: 0.06s | Speed: 540 | Spread: 0.01
+    - Blast Radius: 4.6 | Blast Power: 9 | Pierce: 0 | Gravity: 0 | Melts Stone to Lava: Yes
+    - Description: Continuous white-hot solar plasma beam that bores through armor and melts solid stone into dripping lava.
+    - Quote: "A tap straight into the Runaway Engine's heart. It doesn't dig tunnels; it vitrifies them."
+
+18. Sonic Repeater (SONIC_REPEATER) [UNLOCK COST: 300g]
+    - Damage Type: Sonic
+    - Damage: 12 | Cooldown: 0.12s | Pellets: 1 | Speed: 500 | Spread: 0.03
+    - Blast Radius: 6.0 | Blast Power: 5 | Pierce: 2 | Gravity: 0
+    - Description: Vibrational pulse rifle that shakes brick and stone foundations loose instantly.
+    - Quote: "Tuned to the resonant frequency of Vaelic mortar. One burst and the ceiling files for divorce."
+
+19. Oblivion Chime (OBLIVION_CHIME) [UNLOCK COST: 320g]
+    - Damage Type: Void
+    - Damage: 46 | Cooldown: 0.62s | Pellets: 1 | Speed: 420 | Spread: 0.01
+    - Blast Radius: 11.5 | Blast Power: 10 | Pierce: 2 | Gravity: 0 | Void Erase & Implode: Yes
+    - Description: Resonant dark-matter bell that erases a clean spherical pocket of matter and implodes surrounding masonry.
+    - Quote: "When the chime rings, the stone doesn't crumble—it simply remembers it was never there."
+
+20. Plasma Railgun (PLASMA_RAIL) [UNLOCK COST: 330g]
+    - Damage Type: Plasma
+    - Damage: 44 | Cooldown: 0.65s | Pellets: 1 | Speed: 540 | Spread: 0.01
+    - Blast Radius: 4.5 | Blast Power: 8 | Pierce: 5 | Gravity: 0 | Ignites: Yes
+    - Description: Superheated piercing slug that bores cleanly through stone, brick, and metal.
+    - Quote: "Stolen from an Aether-Wright siege derrick. Leaves a glass-lined tunnel through five men and a pillar."
+
+21. Tempest Choir (TEMPEST_CHOIR) [UNLOCK COST: 340g]
+    - Damage Type: Arc
+    - Damage: 28 | Cooldown: 0.58s | Pellets: 1 | Speed: 165 | Spread: 0.02
+    - Blast Radius: 8.5 | Blast Power: 6 | Pierce: 4 | Gravity: 0 | Drifting Ball-Lightning Conduit: Yes
+    - Description: Launches a slow-drifting ball-lightning choir orb that continuously lashes nearby enemies, metal, and crystal.
+    - Quote: "Three bound storm-wisps singing in a brass cage. Let them loose in a crystal vault and cover your eyes."
+
+22. Tectonic Ram (TECTONIC_RAM) [UNLOCK COST: 360g]
+    - Damage Type: Explosive
+    - Damage: 52 | Cooldown: 0.78s | Pellets: 1 | Speed: 320 | Spread: 0.02
+    - Blast Radius: 15.0 | Blast Power: 10 | Pierce: 1 | Gravity: 40 | Knockback Multiplier: 2.6x
+    - Description: Fires a massive seismic shock-piston that shears whole stone pillars from their bases and launches enemies.
+    - Quote: "Built to crack fault-lines open during the First Delve. Recoil has broken three collarbones this week."
+
+23. Graviton Cannon (GRAVITON_CANNON) [UNLOCK COST: 380g]
     - Damage Type: Explosive
     - Damage: 48 | Cooldown: 0.85s | Pellets: 1 | Speed: 240 | Spread: 0.02
     - Blast Radius: 16.0 | Blast Power: 10 | Pierce: 0 | Gravity: 140
     - Description: Heavy gravity shock launcher that causes catastrophic structural collapses.
+    - Quote: "Multiplies local weight by tenfold for a millisecond. Bridges hate it."
+
+24. Void Singularity (VOID_SINGULARITY_GUN) [UNLOCK COST: 420g]
+    - Damage Type: Void
+    - Damage: 55 | Cooldown: 0.75s | Pellets: 1 | Speed: 280 | Spread: 0.01
+    - Blast Radius: 14.0 | Blast Power: 9 | Pierce: 4 | Gravity: 10
+    - Description: Fires microscopic black holes that pull in nearby pixels, debris, and enemies.
+    - Quote: "The Aether-Wrights swore they only lost three laboratories developing this. The craters say four."
 
 
 DAMAGE TYPES (10)
 ================================================================================
 1. Kinetic (KINETIC)
+   - Codex Tooltip: High-velocity physical slugs that shred soft earth, timber, and ceramics, but ricochet harmlessly off heavy armor plate.
    - Material Multipliers: Jar (2.0x), Barrel (1.8x), Banner (1.6x), Sand (1.5x), Moss (1.5x), Ash (1.5x), Torch (1.5x), Dirt (1.45x), Wood (1.35x), Gold (1.3x), Rubble (1.1x), Crystal (0.95x), Brick (0.78x), Chain (0.65x), Stone (0.35x), Metal (0.22x)
 
-2. Explosive (EXPLOSIVE)
+2. Piercing (PIERCING)
+   - Codex Tooltip: Hyper-dense penetrators engineered to punch deep, narrow channels through layered stone and multiple aligned targets.
+   - Material Multipliers: High single-line penetration across dirt, wood, brick, and stone with multi-target pierce.
+
+3. Explosive (EXPLOSIVE)
+   - Codex Tooltip: High-pressure concussive blasts that fracture load-bearing stone, brick, and crystal to trigger catastrophic ceiling collapses.
    - Material Multipliers: Barrel (2.5x), Jar (2.4x), Brick (2.2x), Crystal (2.2x), Ash (2.0x), Rubble (2.0x), Sand (1.9x), Stone (1.85x), Dirt (1.8x), Banner (1.8x), Torch (1.8x), Moss (1.7x), Gold (1.6x), Wood (1.5x), Metal (0.65x)
 
-3. Thermal (THERMAL)
+4. Thermal (THERMAL)
+   - Codex Tooltip: Incendiary payloads that flash-ignite timber, moss, and pressurized oil vats into self-sustaining infernos.
    - Material Multipliers: Moss (3.0x), Banner (3.0x), Barrel (3.0x), Wood (2.8x), Oil (2.5x), Dirt (1.2x), Jar (0.8x), Gold (0.6x), Crystal (0.55x), Brick (0.5x), Metal (0.45x), Chain (0.45x), Stone (0.4x)
 
-4. Plasma (PLASMA)
+5. Plasma (PLASMA)
+   - Codex Tooltip: Superheated ionized matter that bores effortlessly through heavy metal bulkheads, stone pillars, and reinforced hulls.
    - Material Multipliers: Barrel (2.5x), Oil (2.0x), Chain (1.7x), Metal (1.65x), Stone (1.6x), Wood (1.6x), Rubble (1.5x), Brick (1.45x), Crystal (1.4x), Gold (1.4x), Sand (1.35x)
 
-5. Arc (ARC)
+6. Arc (ARC)
+   - Codex Tooltip: High-voltage current that chains violently through water, iron chains, and resonant crystal, but grounds out in dry dirt.
    - Material Multipliers: Crystal (3.0x), Chain (2.6x), Metal (2.3x), Barrel (1.8x), Jar (1.7x), Gold (1.5x), Water (1.5x), Rubble (0.7x), Stone (0.6x), Brick (0.55x), Moss (0.4x), Wood (0.35x), Dirt (0.3x), Sand (0.25x)
 
-6. Corrosive (CORROSIVE)
-   - Material Multipliers: Metal (2.6x), Chain (2.2x), Moss (1.8x), Brick (1.6x), Stone (1.4x), Rubble (1.35x), Dirt (1.25x), Wood (0.9x), Crystal (0.15x), Gold (0.1x)
+7. Corrosive (CORROSIVE)
+   - Codex Tooltip: Caustic alchemical vitriol that dissolves iron plating and mortar into sludge, though Vaelic gold and crystal remain immune.
+   - Material Multipliers: Metal (2.6x), Chain (2.2x), Moss (1.8x), Brick (1.6x), Stone (1.4x), Rubble (1.35x), Dirt (1.25x), Wood (0.9x), Crystal (0.15x), Gold (0.0x — Inviolate under the Golden Covenant)
 
-7. Laser (LASER)
+8. Laser (LASER)
+   - Codex Tooltip: Coherent zero-drop light beams for surgical excavation of support struts, chains, and volatile crystal veins at any range.
    - Material Multipliers: Crystal (1.7x), Gold (1.6x), Moss (1.6x), Banner (1.6x), Stone (1.55x), Ash (1.5x), Jar (1.5x), Chain (1.5x), Torch (1.5x), Wood (1.45x), Dirt (1.4x), Sand (1.4x), Rubble (1.4x), Brick (1.35x), Metal (0.75x)
 
-8. Cryogenic (CRYOGENIC)
-   - Material Multipliers: Lava (1.6x); freezes and brittles stone and targets.
+9. Cryogenic (CRYOGENIC)
+   - Codex Tooltip: Sub-zero endothermic bolts that flash-freeze enemies solid, turn stone brittle, and crust molten magma into solid rock.
+   - Material Multipliers: Lava (1.6x, solidifies to Stone), Water (freezes/chills), Stone/Brick (embrittles for 2x shatter damage).
 
-9. Sonic (SONIC)
-   - High-frequency structural vibration that loosens brick and stone foundations.
+10. Sonic (SONIC)
+    - Codex Tooltip: Harmonic shockwaves that bypass surface armor to liquefy mortar seams and shake overhead masonry loose into falling slabs.
+    - Material Multipliers: High structural shear against Brick and Stone foundations; triggers CrumblingBody detachment.
 
-10. Void (VOID)
-    - Gravitational singularity damage that pulls in surrounding terrain pixels, debris, and enemies.
+11. Void (VOID)
+    - Codex Tooltip: Gravitational singularities that wrench loose terrain pixels, falling rubble, and nearby constructs into a crushing horizon.
+    - Material Multipliers: Pulls loose pixels and enemies inward while eroding surrounding matter.
 
 
-ENEMIES (8 Combat Enemies + 4 Hub Target Dummies)
+ENEMIES (8 COMBAT CONSTRUCTS + 4 HUB TARGET DUMMIES)
 ================================================================================
+Golden Covenant Rule: Mining sacred Vaelic Gold veins triggers a 260px resonant shockwave
+that enrages nearby constructs for 6.0s (boosting movement speed and attack cadence).
+
 1. Crawler (CRAWLER)
    - Role: Fast ground melee rusher
    - Base HP: 26 | Size: 9x8 | Attack Cooldown: 0.7s | Base Gold: 6 (+2/depth)
-   - Biomes: All biomes
+   - Biomes: All strata
 
 2. Drone (DRONE)
-   - Role: Hovering aerial ranged unit
+   - Role: Hovering aerial ranged surveyor
    - Base HP: 28 | Size: 9x7 | Attack Cooldown: 1.2s | Base Gold: 8 (+2/depth)
-   - Biomes: All biomes
+   - Biomes: All strata
 
 3. Slime (SLIME)
-   - Role: Corrosive ground hopper
+   - Role: Corrosive vitriol ground hopper
    - Base HP: 34 | Size: 9x8 | Attack Cooldown: 0.9s | Base Gold: 9 (+2/depth)
-   - Biomes: All biomes (heaviest in Vitriol Vaults)
+   - Biomes: All strata (heaviest in Vitriol Vaults)
 
 4. Pyro Imp (PYRO_IMP)
    - Role: Aerial thermal projectile caster
    - Base HP: 36 | Size: 10x10 | Attack Cooldown: 1.1s | Base Gold: 13 (+2/depth)
-   - Biomes: Ashen Foundry
+   - Biomes: Ashen Foundry (Stratum II)
 
 5. Crystal Wisp (CRYSTAL_WISP)
    - Role: Aerial prism energy caster
    - Base HP: 40 | Size: 9x11 | Attack Cooldown: 1.35s | Base Gold: 14 (+2/depth)
-   - Biomes: Vitriol Vaults, Sunken Masonry
+   - Biomes: Vitriol Vaults (Stratum III), Sunken Masonry (Stratum I)
 
 6. Turret (TURRET)
    - Role: Stationary armored auto-cannon
    - Base HP: 42 | Size: 9x9 | Attack Cooldown: 1.6s | Base Gold: 12 (+2/depth)
-   - Biomes: All biomes (Depth 2+ and Gauntlet rooms)
+   - Biomes: All strata (Depth 2+ and Gauntlet rooms)
 
 7. Sentinel (SENTINEL)
-   - Role: Armored ground ranged soldier
+   - Role: Armored ground ranged covenant soldier
    - Base HP: 62 | Size: 11x15 | Attack Cooldown: 1.4s | Base Gold: 16 (+3/depth)
-   - Biomes: All biomes
+   - Biomes: All strata
 
 8. Stone Warden (STONE_WARDEN)
    - Role: Heavy masonry juggernaut
    - Base HP: 78 | Size: 13x17 | Attack Cooldown: 1.5s | Base Gold: 20 (+3/depth)
-   - Biomes: Sunken Masonry
+   - Biomes: Sunken Masonry (Stratum I)
 
-Hub Target Range Dummies (Auto-Respawning):
+Hub Target Range Dummies (Auto-Respawning on Upper Eastern Deck):
 - Light Dummy: 120 HP (10x18)
 - High Perch Dummy: 150 HP (10x18)
 - Armored Dummy: 260 HP (11x19)
 - Heavy Plating Dummy: 450 HP (12x20)
 
 
-BIOMES (3 Run Biomes + 1 Hub World)
+BASTION HUB NPCs & WORKSTATIONS
 ================================================================================
-1. Sunken Masonry (SUNKEN_MASONRY)
+1. The Archivist — Keeper of Fractured Annals (ID: ARCHIVIST)
+   - Location: West Archive Alcove (x: 208, y: 415) beside the Tome of Fractured Annals Pedestal (ID: 9994)
+   - Role: Chronicles recovered folio pages across World Lore & Subterranean Strata, Bestiary, and Arsenal; reacts dynamically to the newest unlocked folio and hints at missing lore.
+
+2. Master-Factor Barnaby Vance — Quartermaster of Seized Contraband & Experimental Salvage (ID: VANCE)
+   - Location: Upper Eastern Target Range Deck (x: 1012, y: 303) beside Vance's Contraband Workbench (ID: 9995, x: 1044, y: 301)
+   - Role: Former Chief Ordnance Artificer of the Royal Surface Foundry, condemned to the Subterranean Bastion for refusing to install safety governors. Unseals Tier I, Tier II, and Tier III contraband weapons for Vaelic Gold and racks unlocked weapons for immediate live-fire testing on the adjacent Target Range.
+
+
+BIOMES & 30-LEVEL TRI-STRATA PROGRESSION
+================================================================================
+1. Stratum I — Sunken Masonry (SUNKEN_MASONRY, Depths 1–10)
    - Archetype: Flooded limestone & slate ruins shifting into abyssal indigo and bioluminescent teal
    - Primary Liquid: Water (Mat.WATER)
-   - Preferred Rooms: Ruin, Catacomb, Bridge, Gauntlet, Shaft, Vault
-   - Depth Atmosphere Titles:
-     * Depths 1-3: Tidal Cavern
-     * Depths 4-9: Deep Slate Grotto
-     * Depths 10-15: Abyssal Masonry
-     * Depths 16+: Hadal Trench
-   - Boss Title & Weak Spot: Monolith Warden (Weak Spot: Sapphire Core)
+   - Sub-Tier Atmosphere Titles:
+     * Depths 1–2: Tidal Cavern
+     * Depths 3–5: Deep Slate Grotto
+     * Depths 6–8: Abyssal Masonry
+     * Depths 9–10: Hadal Trench
+   - Depth 5: Subterranean Sanctuary & Anvil Forge
+   - Depth 10 Gatekeeper Boss: Monolith Warden (Weak Spot: Sapphire Core)
 
-2. Ashen Foundry (ASHEN_FOUNDRY)
+2. Stratum II — Ashen Foundry (ASHEN_FOUNDRY, Depths 11–20)
    - Archetype: Smoky basalt & kiln brick smelteries shifting into superheated magma crimson & amber-gold
    - Primary Liquid: Oil (Mat.OIL) + Contained Molten Lava Vats (Mat.LAVA)
-   - Preferred Rooms: Foundry Chamber, Bridge, Gauntlet, Ruin, Shaft, Vault
-   - Depth Atmosphere Titles:
-     * Depths 1-3: Smoldering Forge
-     * Depths 4-9: Cinder Smeltery
-     * Depths 10-15: Magma Ducts
-     * Depths 16+: Crucible Core
-   - Boss Title & Weak Spot: Slag Colossus (Weak Spot: Furnace Heart)
+   - Sub-Tier Atmosphere Titles:
+     * Depths 11–12: Smoldering Forge
+     * Depths 13–15: Cinder Smeltery
+     * Depths 16–18: Magma Ducts
+     * Depths 19–20: Crucible Core
+   - Depth 15: Subterranean Sanctuary & Anvil Forge
+   - Depth 20 Gatekeeper Boss: Slag Colossus (Weak Spot: Furnace Heart)
 
-3. Vitriol Vaults (VITRIOL_VAULTS)
+3. Stratum III — Vitriol Vaults (VITRIOL_VAULTS, Depths 21–30)
    - Archetype: Crystalline caverns rotating across emerald-jade, prism-aqua, and amethyst-quartz mineral harmonics
    - Primary Liquid: Acid (Mat.ACID)
-   - Preferred Rooms: Crystal Grotto, Bridge, Shaft, Catacomb, Vault
-   - Depth Atmosphere Titles:
-     * Depths 1-3: Jade Fracture
-     * Depths 4-9: Prismatic Vault
-     * Depths 10-15: Amethyst Fault
-     * Depths 16+: Astral Geode
-   - Boss Title & Weak Spot: Sovereign Spire (Weak Spot: Crystal Nucleus)
+   - Sub-Tier Atmosphere Titles:
+     * Depths 21–22: Jade Fracture
+     * Depths 23–25: Prismatic Vault
+     * Depths 26–28: Amethyst Fault
+     * Depths 29–30: Astral Geode
+   - Depth 25: Subterranean Sanctuary & Anvil Forge
+   - Depth 30 Sovereign Boss: Sovereign Spire (Weak Spot: Crystal Nucleus) — Shattering the Sovereign Spire grants Royal Clemency & +1 Clemency Seal.
 
-4. Bastion Hub / Subterranean Bastion (HUB_WORLD)
-   - Archetype: Foundry Bastion Safe Haven
-   - Wings & Features:
-     * West Archive Alcove: Houses The Archivist (Keeper of Fractured Annals) and upper Archive Gallery
-     * Central Foundry Hearth: Molten grate walkway, Class/Vault Pedestal, and Controls/Settings Pedestal
-     * Upper Target Range Deck: 4 live auto-respawning target dummies and elevated perch catwalk
-     * East Expedition Staging Dais: Expedition Descent Portal and Loadout Staging Pedestal
+
+BOSS RELICS (6) & ROYAL CLEMENCY PERMANENT UPGRADES (4)
+================================================================================
+Boss Relics (Drafted on Depths 10, 20, 30):
+1. Heart of the Siege Engine (SIEGE_HEART): +50% Bomb radius; structural collapses heal +8 HP per rank and emit concussive shockwaves.
+2. Prism Resonator Core (PRISM_CORE): Every 3rd shot fires twin converging prism laser beams that slice terrain and enemies.
+3. Molten Reactor Matrix (THERMAL_REACTOR): All weapons ignite targets & oil; killing burning enemies erupts in a molten fireball.
+4. Stormforged Conduit (TESLA_COIL): Dash and weapon hits arc chain lightning to nearby enemies and conductive metal/water.
+5. Vampiric Blood Chalice (VOID_CHALICE): Slaying enemies restores HP and spawns volatile void seekers.
+6. Alchemist's Vitriol Core (ALCHEMIST_HEART): Explosions spray corrosive acid droplets; grants immunity to acid pool damage.
+
+Royal Clemency Decrees (Permanent Meta-Upgrades Purchased with Clemency Seals):
+1. Covenant Nullifier Seal (COVENANT_NULLIFIER, Max Rank 3): Reduces Golden Covenant construct enrage duration by 25% per rank and increases Vaelic gold yield by +15% per rank.
+2. Royal Armory Charter (ROYAL_ARMORY_CHARTER, Max Rank 3): Grants +1 free Anvil Forge weapon upgrade or reroll voucher per run and +10% base weapon damage per rank.
+3. Aether-Wright Excitation Core (AETHER_CORE_OVERCLOCK, Max Rank 3): Increases all explosive & structural collapse blast radii by +12% per rank and starts each run with +25 Shield HP per rank.
+4. Sovereign Relic Accord (SOVEREIGN_RELIC_ACCORD, Max Rank 2): Begins every expedition with a pre-bound Boss Relic drawn from your unlocked Relic Registry (+1 starting relic per rank).
 
 
 BOSS PARTS & MODULAR SPECIALS
@@ -218,21 +362,11 @@ Severing a destructible part (Crown, Left Limb, Right Limb, Base) disables its s
    - TURRET_CAP (Turret Cap / Prefix: "Bastion") -> Special: Auto-Cannon Sweep (CROWN_TURRET_CAP)
 
 3. Limb / Wing Styles (5 - Independently Mounted on Left/Port & Right/Starboard; Destructible)
-   - PAULDRON_ARM (Gauntlet Arm)
-     * Port Special: Port Seismic Slam (LEFT_PAULDRON_ARM)
-     * Starboard Special: Starboard Seismic Slam (RIGHT_PAULDRON_ARM)
-   - CANNON_POD (Cannon Pod)
-     * Port Special: Port Artillery Salvo (LEFT_CANNON_POD)
-     * Starboard Special: Starboard Artillery Salvo (RIGHT_CANNON_POD)
-   - CRYSTAL_WING (Crystal Wing)
-     * Port Special: Port Featherblade (LEFT_CRYSTAL_WING)
-     * Starboard Special: Starboard Featherblade (RIGHT_CRYSTAL_WING)
-   - SHIELD_PLATE (Aegis Shield)
-     * Port Special: Port Aegis Repulsor (LEFT_SHIELD_PLATE)
-     * Starboard Special: Starboard Aegis Repulsor (RIGHT_SHIELD_PLATE)
-   - CLAW_PINCER (Pincer Claw)
-     * Port Special: Port Viper Pincer (LEFT_CLAW_PINCER)
-     * Starboard Special: Starboard Viper Pincer (RIGHT_CLAW_PINCER)
+   - PAULDRON_ARM (Gauntlet Arm) -> Port/Starboard Seismic Slam
+   - CANNON_POD (Cannon Pod) -> Port/Starboard Artillery Salvo
+   - CRYSTAL_WING (Crystal Wing) -> Port/Starboard Featherblade
+   - SHIELD_PLATE (Aegis Shield) -> Port/Starboard Aegis Repulsor
+   - CLAW_PINCER (Pincer Claw) -> Port/Starboard Viper Pincer
 
 4. Base / Locomotion Styles (4 - Destructible Undercarriage)
    - PILLAR_LEGS (Pillar Legs) -> Special: Titan Earthquake (BASE_PILLAR_LEGS)
@@ -241,22 +375,18 @@ Severing a destructible part (Crown, Left Limb, Right Limb, Base) disables its s
    - SPIKE_KEEL (Spike Keel) -> Special: Meteor Keel Drop (BASE_SPIKE_KEEL)
 
 5. Core Weak-Spot Slots & Shapes (5 Slots / 3 Geometry Shapes)
-   - CHEST (Chest-Core) -> Special: Chest-Core Overdrive (CORE_RESONANCE_CHEST)
-   - CROWN (Crown-Node) -> Special: Crown-Node Overload (CORE_RESONANCE_CROWN)
-   - LEFT_POD (Port-Reactor) -> Special: Port-Reactor Surge (CORE_RESONANCE_LEFT_POD)
-   - RIGHT_POD (Starboard-Reactor) -> Special: Starboard-Reactor Surge (CORE_RESONANCE_RIGHT_POD)
-   - KEEL (Keel-Core) -> Special: Keel-Core Eruption (CORE_RESONANCE_KEEL)
+   - CHEST (Chest-Core), CROWN (Crown-Node), LEFT_POD (Port-Reactor), RIGHT_POD (Starboard-Reactor), KEEL (Keel-Core)
    - Core Geometry Shapes: ORB, DIAMOND, SLIT (ringed by a segmented Gold protective collar bezel)
 
 6. Synergy Combo Attacks (11 Part-Combination Specials)
-   - Infernal Overpressure (COMBO_INFERNAL_OVERPRESSURE): Requires BOILER Hull + SMOKESTACKS Crown
-   - Bastion Siege Barrage (COMBO_BASTION_SIEGE): Requires CITADEL Hull + TURRET_CAP Crown
-   - Prismatic Annihilation (COMBO_PRISMATIC_ANNIHILATION): Requires DIAMOND Hull + PRONG_SPIRE Crown
-   - Rend & Harvest (COMBO_REND_HARVEST): Requires RIBCAGE Hull + CLAW_PINCER Limb
-   - Seraphim Crystal Dive (COMBO_SERAPHIM_DIVE): Requires CRYSTAL_WING Limb + THRUSTER_BELLS Base
-   - Blitzkrieg Rolling Thunder (COMBO_BLITZKRIEG_THUNDER): Requires TANK_TREADS Base + CANNON_POD Limb
-   - Cataclysm Piledriver (COMBO_CATACLYSM_PILEDRIVER): Requires HORNED Crown + SPIKE_KEEL Base
-   - Phalanx Crusher (COMBO_PHALANX_CRUSHER): Requires PAULDRON_ARM Limb + SHIELD_PLATE Limb
-   - Broadside Obliteration (COMBO_BROADSIDE_OBLITERATION): Requires Dual CANNON_POD Limbs
-   - Solar Eclipse Featherstorm (COMBO_SOLAR_ECLIPSE): Requires Dual CRYSTAL_WING Limbs
-   - Sanctum Tremor Burst (COMBO_SANCTUM_TREMOR): Requires DOME Crown + PILLAR_LEGS Base
+   - Infernal Overpressure (BOILER Hull + SMOKESTACKS Crown)
+   - Bastion Siege Barrage (CITADEL Hull + TURRET_CAP Crown)
+   - Prismatic Annihilation (DIAMOND Hull + PRONG_SPIRE Crown)
+   - Rend & Harvest (RIBCAGE Hull + CLAW_PINCER Limb)
+   - Seraphim Crystal Dive (CRYSTAL_WING Limb + THRUSTER_BELLS Base)
+   - Blitzkrieg Rolling Thunder (TANK_TREADS Base + CANNON_POD Limb)
+   - Cataclysm Piledriver (HORNED Crown + SPIKE_KEEL Base)
+   - Phalanx Crusher (PAULDRON_ARM Limb + SHIELD_PLATE Limb)
+   - Broadside Obliteration (Dual CANNON_POD Limbs)
+   - Solar Eclipse Featherstorm (Dual CRYSTAL_WING Limbs)
+   - Sanctum Tremor Burst (DOME Crown + PILLAR_LEGS Base)

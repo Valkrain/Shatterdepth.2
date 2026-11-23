@@ -58,7 +58,8 @@ export function generateBiomePalette(biomeId: BiomeId, depth: number, seed: numb
   const palSeed = (seed ^ (safeDepth * 2246822519) ^ (biomeId.length * 3266489917)) >>> 0;
   const rng = new SeededRNG(palSeed);
 
-  const depthNorm = Math.min(1, (safeDepth - 1) / 22);
+  const stratumDepth = ((safeDepth - 1) % 10) + 1;
+  const depthNorm = Math.min(1, (stratumDepth - 1) / 9);
   const cycle = Math.floor((safeDepth - 1) / 3);
   const cycleOsc = Math.sin(cycle * 1.35 + (seed % 7) * 0.4);
 
@@ -86,11 +87,11 @@ export function generateBiomePalette(biomeId: BiomeId, depth: number, seed: numb
     const panelBgRgb = hslToRgb(rockHue, 20, lerp(10, 8, depthNorm));
 
     const atmosphereTitle =
-      safeDepth <= 3
+      stratumDepth <= 3
         ? 'Tidal Cavern'
-        : safeDepth <= 9
+        : stratumDepth <= 6
         ? 'Deep Slate Grotto'
-        : safeDepth <= 15
+        : stratumDepth <= 9
         ? 'Abyssal Masonry'
         : 'Hadal Trench';
 
@@ -157,11 +158,11 @@ export function generateBiomePalette(biomeId: BiomeId, depth: number, seed: numb
     const panelBgRgb = hslToRgb(16, 18, lerp(10, 8, depthNorm));
 
     const atmosphereTitle =
-      safeDepth <= 3
+      stratumDepth <= 3
         ? 'Smoldering Forge'
-        : safeDepth <= 9
+        : stratumDepth <= 6
         ? 'Cinder Smeltery'
-        : safeDepth <= 15
+        : stratumDepth <= 9
         ? 'Magma Ducts'
         : 'Crucible Core';
 
@@ -230,11 +231,11 @@ export function generateBiomePalette(biomeId: BiomeId, depth: number, seed: numb
   const panelBgRgb = hslToRgb(stoneHue, 18, lerp(10, 8, depthNorm));
 
   const atmosphereTitle =
-    safeDepth <= 3
+    stratumDepth <= 3
       ? 'Jade Fracture'
-      : safeDepth <= 9
+      : stratumDepth <= 6
       ? 'Prismatic Vault'
-      : safeDepth <= 15
+      : stratumDepth <= 9
       ? 'Amethyst Fault'
       : 'Astral Geode';
 

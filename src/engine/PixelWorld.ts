@@ -34,6 +34,24 @@ export interface CrushHit {
   damage: number;
 }
 
+export const META_PRESSURIZED_OIL = 66;
+export const META_ACID_DRIP_STONE = 74;
+export const META_VOLATILE_CRYSTAL = 88;
+export const META_THERMAL_FAULT = 92;
+export const META_CRYO_BRITTLE = 96;
+
+export type StrataEventKind =
+  | 'VOLATILE_VEIN'
+  | 'OIL_BLOWOUT'
+  | 'ACID_CAVITY'
+  | 'FAULT_COLLAPSE';
+
+export interface StrataReactionEvent {
+  kind: StrataEventKind;
+  x: number;
+  y: number;
+}
+
 export class PixelWorld {
   readonly width = WORLD_W;
   readonly height = WORLD_H;
@@ -81,8 +99,12 @@ export class PixelWorld {
   private stepParity = 0;
   private renderTick = 0;
   private pendingBarrelExplosions: Array<{ x: number; y: number }> = [];
+  private pendingVolatileDetonations: Array<{ x: number; y: number }> = [];
+  private pendingOilBlowouts: Array<{ x: number; y: number; ignite: boolean }> = [];
+  private pendingStrataEvents: StrataReactionEvent[] = [];
   private pendingCrushHits: CrushHit[] = [];
   private pendingGoldDrops: Array<{ x: number; y: number }> = [];
+  private pendingGoldMinedEvents: Array<{ x: number; y: number; count: number }> = [];
   transparentEmpty = false;
   protectChains = false;
 
@@ -136,8 +158,12 @@ export class PixelWorld {
     this.bodyCanvases.clear();
     this.structQueue.length = 0;
     this.pendingBarrelExplosions.length = 0;
+    this.pendingVolatileDetonations.length = 0;
+    this.pendingOilBlowouts.length = 0;
+    this.pendingStrataEvents.length = 0;
     this.pendingCrushHits.length = 0;
     this.pendingGoldDrops.length = 0;
+    this.pendingGoldMinedEvents.length = 0;
     for (let i = 0; i < MAX_PARTICLES; i++) {
       this.particles[i].active = false;
     }
@@ -252,7 +278,8 @@ export class PixelWorld {
     damageType: DamageType = 'EXPLOSIVE',
     ignite = false,
     acid = false,
-    checkStructure = true
+    checkStructure = true,
+    fromPlayer = true
   ): number {
     const icx = Math.round(cx);
     const icy = Math.round(cy);
@@ -262,6 +289,8 @@ export class PixelWorld {
     let chipped = 0;
     let resisted = 0;
     let brokeChain = false;
+    let shookFoundation = false;
+    let goldMinedInBlast = 0;
 
     for (let dy = -r; dy <= r; dy++) {
       const y = icy + dy;
@@ -283,8 +312,45 @@ export class PixelWorld {
           continue;
         }
         const distRatio = Math.sqrt(dist2) / Math.max(1, radius);
-        if (m === Mat.LAVA && damageType === 'CRYOGENIC' && distRatio < 0.85) {
-          this.setPixel(x, y, Mat.STONE, packColor(52, 44, 48));
+
+        // Cryogenic cools molten Lava directly into solid Stone
+        if (m === Mat.LAVA && damageType === 'CRYOGENIC' && distRatio <= 1.0) {
+          this.setPixel(x, y, Mat.STONE, packColor(64, 78, 92), META_CRYO_BRITTLE);
+          if (Math.random() < 0.18) {
+            this.spawnParticle(
+              x + 0.5,
+              y + 0.5,
+              (Math.random() - 0.5) * 40,
+              -25 - Math.random() * 35,
+              Mat.SMOKE,
+              packColor(165, 243, 252),
+              0.45,
+              false,
+              false,
+              2,
+              'DUST'
+            );
+          }
+          continue;
+        }
+
+        // The Golden Covenant ("Gold is inviolate"): sacred Vaelic gold is immune to enemy fire & corrosive acid
+        if (m === Mat.GOLD && (!fromPlayer || damageType === 'CORROSIVE')) {
+          if (distRatio < 0.5 && Math.random() < 0.16) {
+            this.spawnParticle(
+              x + 0.5,
+              y + 0.5,
+              (Math.random() - 0.5) * 70,
+              -20 - Math.random() * 50,
+              Mat.EMBER,
+              packColor(253, 224, 71),
+              0.3,
+              false,
+              false,
+              1,
+              'SPARK'
+            );
+          }
           continue;
         }
 
@@ -312,7 +378,14 @@ export class PixelWorld {
         }
 
         const rawHit = power * 5.2 * (1.25 - distRatio * 0.75);
-        const typeMul = props.damageMul[damageType] ?? 1.0;
+        let typeMul = props.damageMul[damageType] ?? 1.0;
+        // Cryo-brittle stone/brick/crystal shatters for 2.25x damage under Kinetic, Explosive, or Sonic force
+        if (
+          this.meta[idx] === META_CRYO_BRITTLE &&
+          (damageType === 'KINETIC' || damageType === 'EXPLOSIVE' || damageType === 'SONIC')
+        ) {
+          typeMul *= 2.25;
+        }
         const effDmg = rawHit * typeMul;
 
         if (m === Mat.BARREL) {
@@ -332,6 +405,7 @@ export class PixelWorld {
 
         if (breaks) {
           const oldCol = this.color[idx];
+          const oldMeta = this.meta[idx];
           this.mat[idx] = Mat.EMPTY;
           this.color[idx] = 0;
           this.meta[idx] = 0;
@@ -341,9 +415,79 @@ export class PixelWorld {
           if (m === Mat.CHAIN) {
             brokeChain = true;
           }
+          if (m === Mat.GOLD && fromPlayer) {
+            goldMinedInBlast++;
+          }
 
           if ((m === Mat.GOLD || m === Mat.JAR) && Math.random() < 0.25) {
             this.pendingGoldDrops.push({ x, y });
+          }
+
+          // Subterranean Strata Lore Chain-Reaction Mechanics!
+          if (m === Mat.CRYSTAL && oldMeta === META_VOLATILE_CRYSTAL) {
+            if (this.pendingVolatileDetonations.length < 32) {
+              this.pendingVolatileDetonations.push({ x, y });
+            }
+            this.queueStrataEvent('VOLATILE_VEIN', x, y);
+          } else if (m === Mat.OIL && oldMeta === META_PRESSURIZED_OIL) {
+            if (this.pendingOilBlowouts.length < 12) {
+              this.pendingOilBlowouts.push({
+                x,
+                y,
+                ignite: ignite || damageType === 'THERMAL' || damageType === 'PLASMA' || damageType === 'EXPLOSIVE',
+              });
+            }
+            this.queueStrataEvent('OIL_BLOWOUT', x, y);
+          } else if (m === Mat.STONE && oldMeta === META_ACID_DRIP_STONE) {
+            this.propagateStressCrack(x, y, dx, dy, true);
+            for (let a = 0; a < 3; a++) {
+              const ang = Math.atan2(dy, dx) + (Math.random() - 0.5) * 1.6;
+              const spd = 55 + Math.random() * 95;
+              this.spawnParticle(
+                x + 0.5,
+                y + 0.5,
+                Math.cos(ang) * spd,
+                Math.sin(ang) * spd - 24,
+                Mat.ACID,
+                packColor(78, 240, 102),
+                1.5,
+                true
+              );
+            }
+            this.queueStrataEvent('ACID_CAVITY', x, y);
+          } else if ((m === Mat.BRICK || m === Mat.STONE) && oldMeta === META_THERMAL_FAULT) {
+            this.propagateStressCrack(x, y, dx, dy, false);
+            this.queueStrataEvent('FAULT_COLLAPSE', x, y);
+          } else if (m === Mat.BRICK || m === Mat.STONE) {
+            // Check if breaking this brittle wall breached an adjacent pressurized oil pocket or volatile crystal vein!
+            const nOffsets = [-1, 1, -WORLD_W, WORLD_W];
+            for (let n = 0; n < 4; n++) {
+              const ni = idx + nOffsets[n];
+              if (ni <= WORLD_W || ni >= this.size - WORLD_W) continue;
+              const nm = this.mat[ni] as Mat;
+              const nMeta = this.meta[ni];
+              if (nm === Mat.OIL && nMeta === META_PRESSURIZED_OIL) {
+                if (this.pendingOilBlowouts.length < 12) {
+                  this.pendingOilBlowouts.push({
+                    x: ni % WORLD_W,
+                    y: (ni / WORLD_W) | 0,
+                    ignite: ignite || damageType === 'THERMAL' || damageType === 'PLASMA' || damageType === 'EXPLOSIVE',
+                  });
+                }
+                this.queueStrataEvent('OIL_BLOWOUT', x, y);
+                break;
+              } else if (nm === Mat.CRYSTAL && nMeta === META_VOLATILE_CRYSTAL) {
+                this.meta[ni] = 0;
+                if (this.pendingVolatileDetonations.length < 32) {
+                  this.pendingVolatileDetonations.push({
+                    x: ni % WORLD_W,
+                    y: (ni / WORLD_W) | 0,
+                  });
+                }
+                this.queueStrataEvent('VOLATILE_VEIN', x, y);
+                break;
+              }
+            }
           }
 
           // Material-specific secondary destruction behaviors!
@@ -466,6 +610,56 @@ export class PixelWorld {
           }
         } else {
           // Material survived hit -> accumulate visible structural wear
+          // Cryogenic embrittles surviving Stone, Brick, and Crystal
+          if (
+            damageType === 'CRYOGENIC' &&
+            (m === Mat.STONE || m === Mat.BRICK || m === Mat.CRYSTAL) &&
+            this.meta[idx] === 0
+          ) {
+            this.meta[idx] = META_CRYO_BRITTLE;
+            const [cr, cg, cb] = unpackColor(this.color[idx]);
+            this.color[idx] = packColor(
+              Math.min(255, Math.round(cr * 0.65 + 45)),
+              Math.min(255, Math.round(cg * 0.7 + 72)),
+              Math.min(255, Math.round(cb * 0.7 + 90))
+            );
+            this.markDirty(x, y);
+          }
+
+          // Sonic vibrations rattle surviving border Stone, Brick, and Crystal foundations loose into falling Rubble/Sand
+          if (
+            damageType === 'SONIC' &&
+            (m === Mat.STONE || m === Mat.BRICK || m === Mat.CRYSTAL) &&
+            Math.random() < 0.42
+          ) {
+            const hasOpenNeighbor =
+              this.mat[idx - 1] === Mat.EMPTY ||
+              this.mat[idx + 1] === Mat.EMPTY ||
+              this.mat[idx - WORLD_W] === Mat.EMPTY ||
+              this.mat[idx + WORLD_W] === Mat.EMPTY;
+            if (hasOpenNeighbor) {
+              const oldCol = this.color[idx];
+              this.mat[idx] = Mat.EMPTY;
+              this.color[idx] = 0;
+              this.meta[idx] = 0;
+              this.pixelDmg[idx] = 0;
+              this.markDirty(x, y);
+              destroyed++;
+              shookFoundation = true;
+              this.spawnParticle(
+                x + 0.5,
+                y + 0.5,
+                (Math.random() - 0.5) * 75,
+                -15 - Math.random() * 35,
+                Math.random() < 0.72 ? Mat.RUBBLE : Mat.SAND,
+                oldCol,
+                1.8,
+                true
+              );
+              continue;
+            }
+          }
+
           if (dmgDelta > 0) {
             this.pixelDmg[idx] = Math.min(254, nextDmg);
             this.markDirty(x, y);
@@ -506,12 +700,16 @@ export class PixelWorld {
       }
     }
 
+    if (goldMinedInBlast > 0) {
+      this.pendingGoldMinedEvents.push({ x: icx, y: icy, count: goldMinedInBlast });
+    }
+
     if (destroyed > 0) {
       this.pixelsDestroyedCount += destroyed;
       if (destroyed <= 12) {
         sfx.playChip();
       }
-      if (checkStructure && (destroyed >= 4 || brokeChain)) {
+      if (checkStructure && (destroyed >= 4 || brokeChain || shookFoundation)) {
         this.queueStructuralCheck(icx, icy);
       }
     } else if (chipped > 0 || resisted > 0) {
@@ -532,7 +730,314 @@ export class PixelWorld {
       }
     }
 
+    // Handle immediate pressurized oil pocket blowouts
+    if (this.pendingOilBlowouts.length > 0) {
+      const blowouts = this.pendingOilBlowouts.splice(0, 4);
+      const triggered: Array<{ x: number; y: number }> = [];
+      for (const bo of blowouts) {
+        if (!triggered.some((t) => Math.hypot(t.x - bo.x, t.y - bo.y) < 18)) {
+          triggered.push(bo);
+          this.eruptPressurizedOilPocket(bo.x, bo.y, bo.ignite);
+        }
+      }
+    }
+
     return destroyed;
+  }
+
+  private queueStrataEvent(kind: StrataEventKind, x: number, y: number): void {
+    for (const ev of this.pendingStrataEvents) {
+      if (ev.kind === kind && Math.hypot(ev.x - x, ev.y - y) < 36) return;
+    }
+    if (this.pendingStrataEvents.length < 8) {
+      this.pendingStrataEvents.push({ kind, x, y });
+    }
+  }
+
+  consumeStrataEvents(): StrataReactionEvent[] {
+    if (this.pendingStrataEvents.length === 0) return [];
+    return this.pendingStrataEvents.splice(0, this.pendingStrataEvents.length);
+  }
+
+  consumeGoldMinedEvents(): Array<{ x: number; y: number; count: number }> {
+    if (this.pendingGoldMinedEvents.length === 0) return [];
+    return this.pendingGoldMinedEvents.splice(0, this.pendingGoldMinedEvents.length);
+  }
+
+  pullLoosePixelsToward(cx: number, cy: number, pullRadius: number): number {
+    const icx = Math.round(cx);
+    const icy = Math.round(cy);
+    const r = Math.ceil(pullRadius);
+    const r2 = pullRadius * pullRadius;
+    let pulled = 0;
+
+    for (let attempt = 0; attempt < 26 && pulled < 14; attempt++) {
+      const dx = Math.round((Math.random() * 2 - 1) * r);
+      const dy = Math.round((Math.random() * 2 - 1) * r);
+      const d2 = dx * dx + dy * dy;
+      if (d2 < 16 || d2 > r2) continue;
+      const x = icx + dx;
+      const y = icy + dy;
+      if (x <= 2 || x >= WORLD_W - 3 || y <= 2 || y >= WORLD_H - 4) continue;
+      const idx = y * WORLD_W + x;
+      const m = this.mat[idx] as Mat;
+      if (
+        m !== Mat.SAND &&
+        m !== Mat.DIRT &&
+        m !== Mat.RUBBLE &&
+        m !== Mat.ASH &&
+        m !== Mat.WATER &&
+        m !== Mat.OIL &&
+        m !== Mat.ACID &&
+        m !== Mat.MOSS
+      ) {
+        continue;
+      }
+
+      const col = this.color[idx];
+      this.mat[idx] = Mat.EMPTY;
+      this.color[idx] = 0;
+      this.meta[idx] = 0;
+      this.pixelDmg[idx] = 0;
+      this.markDirty(x, y);
+
+      const dist = Math.sqrt(d2) || 1;
+      const speed = 95 + Math.random() * 75;
+      const vx = (-dx / dist) * speed;
+      const vy = (-dy / dist) * speed - 18;
+      this.spawnParticle(x + 0.5, y + 0.5, vx, vy, m, col, 0.55, true);
+      pulled++;
+    }
+    return pulled;
+  }
+
+  conductArc(
+    cx: number,
+    cy: number,
+    maxRadius = 42
+  ): { points: Array<{ x: number; y: number }>; grounded: boolean } {
+    const icx = Math.round(cx);
+    const icy = Math.round(cy);
+    const points: Array<{ x: number; y: number }> = [];
+    let touchedConductor = false;
+    let touchedInsulator = false;
+
+    for (let dy = -6; dy <= 6; dy++) {
+      const y = icy + dy;
+      if (y <= 1 || y >= WORLD_H - 2) continue;
+      for (let dx = -6; dx <= 6; dx++) {
+        const x = icx + dx;
+        if (x <= 1 || x >= WORLD_W - 2) continue;
+        const m = this.mat[y * WORLD_W + x] as Mat;
+        if (m === Mat.WATER || m === Mat.METAL || m === Mat.CHAIN) {
+          touchedConductor = true;
+        } else if (m === Mat.DIRT || m === Mat.SAND || m === Mat.WOOD) {
+          touchedInsulator = true;
+        }
+      }
+    }
+
+    if (!touchedConductor) {
+      if (touchedInsulator) {
+        // Grounded by dirt/sand/wood
+        for (let i = 0; i < 5; i++) {
+          this.spawnParticle(
+            icx + (Math.random() - 0.5) * 6,
+            icy + (Math.random() - 0.5) * 6,
+            (Math.random() - 0.5) * 45,
+            -15 - Math.random() * 25,
+            Mat.SMOKE,
+            packColor(145, 118, 92),
+            0.35,
+            false,
+            false,
+            2,
+            'DUST'
+          );
+        }
+      }
+      return { points, grounded: touchedInsulator };
+    }
+
+    const r = Math.ceil(maxRadius);
+    const r2 = maxRadius * maxRadius;
+    for (let dy = -r; dy <= r; dy += 3) {
+      const y = icy + dy;
+      if (y <= 1 || y >= WORLD_H - 2) continue;
+      for (let dx = -r; dx <= r; dx += 3) {
+        const x = icx + dx;
+        if (x <= 1 || x >= WORLD_W - 2) continue;
+        if (dx * dx + dy * dy > r2) continue;
+        const idx = y * WORLD_W + x;
+        const m = this.mat[idx] as Mat;
+        if (m === Mat.WATER || m === Mat.METAL || m === Mat.CHAIN) {
+          points.push({ x, y });
+          if (Math.random() < 0.26) {
+            this.spawnParticle(
+              x + 0.5,
+              y + 0.5,
+              (Math.random() - 0.5) * 65,
+              -20 - Math.random() * 45,
+              Mat.EMBER,
+              packColor(167, 243, 208),
+              0.3,
+              false,
+              false,
+              1,
+              'SPARK'
+            );
+          }
+        }
+      }
+    }
+
+    return { points, grounded: false };
+  }
+
+  private propagateStressCrack(
+    startX: number,
+    startY: number,
+    impDx: number,
+    impDy: number,
+    isAcidHoneycomb: boolean
+  ): void {
+    const baseAngle =
+      impDx === 0 && impDy === 0
+        ? Math.random() * Math.PI * 2
+        : Math.atan2(impDy, impDx) + (Math.random() - 0.5) * 0.85;
+    let cx = startX;
+    let cy = startY;
+    const len = 7 + ((Math.random() * 8) | 0);
+
+    for (let step = 1; step <= len; step++) {
+      const jitter = (Math.random() - 0.5) * 0.9;
+      cx += Math.cos(baseAngle + jitter);
+      cy += Math.sin(baseAngle + jitter);
+      const ix = Math.round(cx);
+      const iy = Math.round(cy);
+      if (ix <= 4 || ix >= WORLD_W - 5 || iy <= 4 || iy >= WORLD_H - 5) break;
+
+      const idx = iy * WORLD_W + ix;
+      const m = this.mat[idx] as Mat;
+      if (m !== Mat.BRICK && m !== Mat.STONE) continue;
+
+      const props = MAT_PROPS[m];
+      const nextDmg = this.pixelDmg[idx] + Math.round(props.maxHp * 0.72);
+      if (nextDmg >= props.maxHp || step <= 3) {
+        const oldCol = this.color[idx];
+        this.mat[idx] = isAcidHoneycomb && Math.random() < 0.35 ? Mat.ACID : Mat.EMPTY;
+        this.color[idx] =
+          this.mat[idx] === Mat.ACID ? packColor(74, 236, 98) : 0;
+        this.meta[idx] = 0;
+        this.pixelDmg[idx] = 0;
+        this.markDirty(ix, iy);
+        if (Math.random() < 0.35) {
+          this.spawnParticle(
+            ix + 0.5,
+            iy + 0.5,
+            (Math.random() - 0.5) * 80,
+            -25 - Math.random() * 45,
+            isAcidHoneycomb ? Mat.ACID : Mat.EMBER,
+            isAcidHoneycomb ? packColor(88, 244, 112) : oldCol,
+            0.7,
+            isAcidHoneycomb
+          );
+        }
+      } else {
+        this.pixelDmg[idx] = Math.min(254, nextDmg);
+        this.markDirty(ix, iy);
+      }
+    }
+    this.queueStructuralCheck(startX, startY);
+  }
+
+  private eruptPressurizedOilPocket(cx: number, cy: number, ignite: boolean): void {
+    const r = 16;
+    let openDirX = 0;
+    let openDirY = -0.35;
+
+    // Determine direction toward nearest open cavern air for geyser spray
+    for (let dy = -12; dy <= 12; dy += 3) {
+      for (let dx = -12; dx <= 12; dx += 3) {
+        const tx = cx + dx;
+        const ty = cy + dy;
+        if (this.inBounds(tx, ty) && this.getMat(tx, ty) === Mat.EMPTY) {
+          openDirX += dx;
+          openDirY += dy;
+        }
+      }
+    }
+    const norm = Math.hypot(openDirX, openDirY) || 1;
+    openDirX /= norm;
+    openDirY /= norm;
+
+    sfx.playExplosion(0.85);
+
+    for (let dy = -r; dy <= r; dy++) {
+      const y = cy + dy;
+      if (y <= 3 || y >= WORLD_H - 4) continue;
+      for (let dx = -r; dx <= r; dx++) {
+        const x = cx + dx;
+        if (x <= 3 || x >= WORLD_W - 4) continue;
+        if (dx * dx + dy * dy > r * r) continue;
+        const idx = y * WORLD_W + x;
+        const m = this.mat[idx] as Mat;
+        const metaVal = this.meta[idx];
+
+        if (m === Mat.OIL && metaVal === META_PRESSURIZED_OIL) {
+          this.meta[idx] = 0;
+          if (ignite && Math.random() < 0.65) {
+            this.setPixel(x, y, Mat.FIRE, packColor(255, 155, 34), 42);
+          } else if (Math.random() < 0.62) {
+            const col = this.color[idx];
+            this.mat[idx] = Mat.EMPTY;
+            this.color[idx] = 0;
+            this.markDirty(x, y);
+            const sprayAng = Math.atan2(openDirY, openDirX) + (Math.random() - 0.5) * 0.95;
+            const speed = 95 + Math.random() * 145;
+            this.spawnParticle(
+              x + 0.5,
+              y + 0.5,
+              Math.cos(sprayAng) * speed,
+              Math.sin(sprayAng) * speed - 30,
+              ignite && Math.random() < 0.5 ? Mat.EMBER : Mat.OIL,
+              ignite && Math.random() < 0.5 ? packColor(255, 175, 45) : col,
+              1.9,
+              true,
+              ignite
+            );
+          }
+        } else if (
+          (m === Mat.BRICK || m === Mat.STONE) &&
+          (this.pixelDmg[idx] >= MAT_PROPS[m].maxHp * 0.35 || metaVal === META_THERMAL_FAULT)
+        ) {
+          // Blow out the brittle masonry crust sealing the pocket!
+          const oldCol = this.color[idx];
+          this.mat[idx] = Mat.EMPTY;
+          this.color[idx] = 0;
+          this.meta[idx] = 0;
+          this.pixelDmg[idx] = 0;
+          this.markDirty(x, y);
+          if (Math.random() < 0.55) {
+            const sprayAng = Math.atan2(openDirY, openDirX) + (Math.random() - 0.5) * 1.1;
+            const speed = 75 + Math.random() * 110;
+            this.spawnParticle(
+              x + 0.5,
+              y + 0.5,
+              Math.cos(sprayAng) * speed,
+              Math.sin(sprayAng) * speed - 35,
+              Mat.RUBBLE,
+              oldCol,
+              1.7,
+              true,
+              ignite,
+              Math.random() < 0.4 ? 2 : 1
+            );
+          }
+        }
+      }
+    }
+    this.queueStructuralCheck(cx, cy);
   }
 
   queueStructuralCheck(x: number, y: number): void {
@@ -1245,7 +1750,18 @@ export class PixelWorld {
             const x = this.stepParity === 0 ? xStart + xi : xEnd - xi;
             const idx = row + x;
             const m = this.mat[idx] as Mat;
-            if (m === Mat.EMPTY || m === Mat.BEDROCK || m === Mat.STONE || m === Mat.BRICK || m === Mat.METAL) {
+            if (m === Mat.EMPTY || m === Mat.BEDROCK || m === Mat.BRICK || m === Mat.METAL) {
+              continue;
+            }
+
+            if (m === Mat.STONE) {
+              // Honeycombed acid-drip limestone telltale: slowly weeps corrosive acid droplets into open air below!
+              if (this.meta[idx] === META_ACID_DRIP_STONE) {
+                this.nextDirtyChunks[cy * CHUNKS_X + cx] = 1;
+                if (y < WORLD_H - 4 && this.mat[idx + WORLD_W] === Mat.EMPTY && Math.random() < 0.004) {
+                  this.setPixel(x, y + 1, Mat.ACID, packColor(76, 236, 98), 0);
+                }
+              }
               continue;
             }
 
@@ -1283,6 +1799,19 @@ export class PixelWorld {
           triggered.push(b);
           sfx.playExplosion(1.1);
           this.destroyCircle(b.x, b.y, 18, 8, 'EXPLOSIVE', true, false, true);
+        }
+      }
+    }
+
+    // Cascading volatile crystal vein chain detonations (propagates frame-by-frame along the vein!)
+    if (this.pendingVolatileDetonations.length > 0) {
+      const nodes = this.pendingVolatileDetonations.splice(0, 3);
+      const triggered: Array<{ x: number; y: number }> = [];
+      for (const v of nodes) {
+        if (!triggered.some((t) => Math.hypot(t.x - v.x, t.y - v.y) < 9)) {
+          triggered.push(v);
+          sfx.playExplosion(0.75);
+          this.destroyCircle(v.x, v.y, 12, 7, 'ARC', false, false, true);
         }
       }
     }
@@ -1696,17 +2225,28 @@ export class PixelWorld {
             }
           }
 
-          // Animated shimmer glints on Crystal & Gold veins
-          if ((m === Mat.CRYSTAL || m === Mat.GOLD) && ((i + (i >> 9) * 3 + (tick >> 2)) & 63) === 0) {
+          // Animated shimmer glints on Crystal & Gold veins + high-frequency resonance pulse on Volatile Crystal Veins
+          const metaVal = this.meta[i];
+          if (m === Mat.CRYSTAL && metaVal === META_VOLATILE_CRYSTAL) {
+            const pulse = ((i * 5 + (tick >> 1)) & 15);
+            if (pulse < 3) {
+              shadeScale = 395;
+            } else if (pulse === 8) {
+              shadeScale = 320;
+            }
+          } else if ((m === Mat.CRYSTAL || m === Mat.GOLD) && ((i + (i >> 9) * 3 + (tick >> 2)) & 63) === 0) {
             shadeScale = 345;
+          } else if (metaVal === META_THERMAL_FAULT && ((x + y + (tick >> 2)) & 7) === 0) {
+            // Subtle warm thermal stress glint in cracked foundry brick
+            shadeScale = 310;
           }
         }
 
         if (d > 0) {
           const maxHp = props.maxHp || 16;
           const frac = Math.min(1, d / maxHp);
-          const isCrack = frac > 0.36 && ((i ^ (i >> 10)) & 1) === 0;
-          const dmgScale = isCrack ? 105 : ((256 - frac * 112) | 0);
+          const isCrack = frac > 0.32 && ((i ^ (i >> 10)) & 1) === 0;
+          const dmgScale = isCrack ? 102 : ((256 - frac * 112) | 0);
           shadeScale = (shadeScale * dmgScale) >> 8;
         }
 

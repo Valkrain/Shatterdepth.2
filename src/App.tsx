@@ -19,21 +19,38 @@ import {
   X,
   Crosshair,
   Music,
+  BookOpen,
+  Lock,
 } from 'lucide-react';
-import { BIOMES, CLASSES } from './engine/catalog';
+import {
+  BIOMES,
+  CLASSES,
+  CLEMENCY_UPGRADES,
+  LOOTABLE_WEAPONS,
+  STARTER_UNLOCKED_RELICS,
+  STARTER_UNLOCKED_WEAPONS,
+  VANCE_DIALOGUE,
+  WEAPON_TIER_LABELS,
+  WEAPONS,
+} from './engine/catalog';
 import { GameEngine } from './engine/GameEngine';
+import { LORE_CATALOG, LORE_CATALOG_MAP, LORE_CATEGORY_LABELS } from './engine/loreCatalog';
 import { rockMusic } from './engine/RockMusicEngine';
 import { sfx } from './engine/SoundFX';
 import {
   ClassId,
+  ClemencyUpgradeId,
   DAMAGE_TYPE_LABELS,
   GameState,
   HudPalette,
   HudSnapshot,
+  LoreCategory,
   MetaProgress,
   PerkDef,
   RelicDraftOption,
   RunStats,
+  WeaponId,
+  WeaponTier,
 } from './engine/types';
 import { enterImmersiveFullscreen, useFullscreenAndInstall } from './hooks/useFullscreenAndInstall';
 
@@ -41,6 +58,13 @@ const META_KEY = 'shatterdepth_meta_v1';
 
 const DEFAULT_SLOT_META: MetaProgress = {
   persistentGold: 0,
+  totalGoldRemitted: 0,
+  clemencyGranted: false,
+  clemencyCount: 0,
+  clemencySeals: 0,
+  unlockedWeaponIds: STARTER_UNLOCKED_WEAPONS,
+  unlockedRelicIds: STARTER_UNLOCKED_RELICS,
+  clemencyUpgradeLevels: {},
   maxHpLevel: 0,
   startBombsLevel: 0,
   damageLevel: 0,
@@ -51,13 +75,23 @@ const DEFAULT_SLOT_META: MetaProgress = {
   totalPixelsDestroyed: 0,
   totalCollapses: 0,
   runsCompleted: 0,
+  unlockedLoreIds: [],
+  lastUnlockedLoreId: null,
 };
 
 function loadSlotMeta(slotId: number): MetaProgress {
   try {
     const raw = localStorage.getItem(`shatterdepth_save_slot_${slotId}`);
     if (!raw) return DEFAULT_SLOT_META;
-    return { ...DEFAULT_SLOT_META, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw) as Partial<MetaProgress>;
+    const mergedWeapons = Array.from(
+      new Set<WeaponId>([...STARTER_UNLOCKED_WEAPONS, ...(parsed.unlockedWeaponIds ?? [])])
+    );
+    return {
+      ...DEFAULT_SLOT_META,
+      ...parsed,
+      unlockedWeaponIds: mergedWeapons,
+    };
   } catch {
     return DEFAULT_SLOT_META;
   }
@@ -94,6 +128,12 @@ export default function App() {
 
   const [gameState, setGameState] = useState<GameState>('START_SCREEN');
   const [selectedClass, setSelectedClass] = useState<ClassId>('BREACHER');
+  const [selectedStarters, setSelectedStarters] = useState<[WeaponId, WeaponId]>([
+    'RIVET_PUNCHER',
+    'CINDER_BELLOWS',
+  ]);
+  const [contrabandTier, setContrabandTier] = useState<WeaponTier>(1);
+  const [vanceBark, setVanceBark] = useState<string>(() => VANCE_DIALOGUE.greetings[0]);
   const [seedInput, setSeedInput] = useState<string>(() => String(randomSeed()));
   const [previousSeed, setPreviousSeed] = useState<string | null>(null);
   const [muted, setMuted] = useState<boolean>(false);
@@ -116,22 +156,45 @@ export default function App() {
       return 1;
     }
   });
+  const activeSlotRef = useRef<number>(activeSlot);
+  useEffect(() => {
+    activeSlotRef.current = activeSlot;
+  }, [activeSlot]);
+
   const [meta, setMeta] = useState<MetaProgress>(() => loadSlotMeta(activeSlot));
-  const [activeHubModal, setActiveHubModal] = useState<'NONE' | 'VAULT' | 'EXPEDITION'>('NONE');
+  const [activeHubModal, setActiveHubModal] = useState<
+    'NONE' | 'VAULT' | 'EXPEDITION' | 'TOME' | 'CONTRABAND'
+  >('NONE');
+  const [tomeCategory, setTomeCategory] = useState<LoreCategory>('WORLD_STRATA');
+  const [selectedLoreId, setSelectedLoreId] = useState<string>('STRATA_OVERVIEW');
   const [showStartSettings, setShowStartSettings] = useState<boolean>(false);
+
+  useEffect(() => {
+    engineRef.current?.syncLoreProgress(meta.unlockedLoreIds ?? [], meta.lastUnlockedLoreId ?? null);
+  }, [meta.unlockedLoreIds, meta.lastUnlockedLoreId]);
+
+  useEffect(() => {
+    engineRef.current?.syncWeaponPool(meta.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS);
+  }, [meta.unlockedWeaponIds]);
 
   const handleSelectSlot = (slotId: number) => {
     setActiveSlot(slotId);
+    activeSlotRef.current = slotId;
     try {
       localStorage.setItem('shatterdepth_active_slot', String(slotId));
     } catch {}
-    setMeta(loadSlotMeta(slotId));
+    const loaded = loadSlotMeta(slotId);
+    setMeta(loaded);
+    engineRef.current?.syncLoreProgress(loaded.unlockedLoreIds ?? [], loaded.lastUnlockedLoreId ?? null);
+    engineRef.current?.syncWeaponPool(loaded.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS);
   };
 
   const handleDeleteSlot = (slotId: number) => {
     deleteSlotMeta(slotId);
     if (slotId === activeSlot) {
       setMeta(DEFAULT_SLOT_META);
+      engineRef.current?.syncLoreProgress([], null);
+      engineRef.current?.syncWeaponPool(STARTER_UNLOCKED_WEAPONS);
     }
   };
 
@@ -243,25 +306,104 @@ export default function App() {
           const next: MetaProgress = {
             ...prev,
             persistentGold: prev.persistentGold + stats.goldCollected,
+            totalGoldRemitted: (prev.totalGoldRemitted ?? 0) + stats.goldCollected,
+            clemencyGranted: (prev.clemencyGranted ?? false) || stats.depth >= 30,
             bestDepth: Math.max(prev.bestDepth, stats.depth),
             bestGold: Math.max(prev.bestGold, stats.goldCollected),
             totalPixelsDestroyed: prev.totalPixelsDestroyed + stats.pixelsDestroyed,
             totalCollapses: prev.totalCollapses + stats.segmentsCollapsed,
             runsCompleted: prev.runsCompleted + 1,
           };
-          saveSlotMeta(activeSlot, next);
+          saveSlotMeta(activeSlotRef.current, next);
           return next;
         });
       },
       onOpenVaultModal: () => setActiveHubModal('VAULT'),
       onOpenExpeditionModal: () => setActiveHubModal('EXPEDITION'),
+      onOpenContrabandModal: () => {
+        setMeta((currMeta) => {
+          const unlockedCount = (currMeta.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS).length;
+          const pool =
+            unlockedCount >= LOOTABLE_WEAPONS.length
+              ? VANCE_DIALOGUE.maxedOut
+              : VANCE_DIALOGUE.greetings;
+          setVanceBark(pool[Math.floor(Math.random() * pool.length)]);
+          return currMeta;
+        });
+        setActiveHubModal('CONTRABAND');
+      },
       onOpenSettingsModal: () => {
         engineRef.current?.loadTitlePreview(parsedSeed());
         setGameState('START_SCREEN');
       },
+      onOpenTomeModal: () => {
+        setMeta((currMeta) => {
+          const newestId = currMeta.lastUnlockedLoreId;
+          if (newestId && LORE_CATALOG_MAP[newestId]) {
+            setTomeCategory(LORE_CATALOG_MAP[newestId].category);
+            setSelectedLoreId(newestId);
+          }
+          return currMeta;
+        });
+        setActiveHubModal('TOME');
+      },
+      onUnlockLore: (loreId) => {
+        setMeta((prev) => {
+          const existing = prev.unlockedLoreIds ?? [];
+          if (existing.includes(loreId)) return prev;
+          const next: MetaProgress = {
+            ...prev,
+            unlockedLoreIds: [...existing, loreId],
+            lastUnlockedLoreId: loreId,
+          };
+          saveSlotMeta(activeSlotRef.current, next);
+          return next;
+        });
+      },
+      onUnlockWeapon: (weaponId) => {
+        setMeta((prev) => {
+          const existing = prev.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS;
+          if (existing.includes(weaponId)) return prev;
+          const next: MetaProgress = {
+            ...prev,
+            unlockedWeaponIds: [...existing, weaponId],
+          };
+          saveSlotMeta(activeSlotRef.current, next);
+          return next;
+        });
+      },
+      onUnlockRelic: (relicId) => {
+        setMeta((prev) => {
+          const existing = prev.unlockedRelicIds ?? STARTER_UNLOCKED_RELICS;
+          if (existing.includes(relicId)) return prev;
+          const next: MetaProgress = {
+            ...prev,
+            unlockedRelicIds: [...existing, relicId],
+          };
+          saveSlotMeta(activeSlotRef.current, next);
+          return next;
+        });
+      },
+      onGrantClemency: (depthReached, goldRemitted) => {
+        setMeta((prev) => {
+          const next: MetaProgress = {
+            ...prev,
+            bestDepth: Math.max(prev.bestDepth, depthReached),
+            clemencyGranted: true,
+            clemencyCount: (prev.clemencyCount ?? 0) + 1,
+            clemencySeals: (prev.clemencySeals ?? 0) + 1,
+            totalGoldRemitted: (prev.totalGoldRemitted ?? 0) + goldRemitted,
+          };
+          saveSlotMeta(activeSlotRef.current, next);
+          return next;
+        });
+      },
     });
 
     engineRef.current = engine;
+    const initSlotMeta = loadSlotMeta(activeSlotRef.current);
+    engine.syncLoreProgress(initSlotMeta.unlockedLoreIds ?? [], initSlotMeta.lastUnlockedLoreId ?? null);
+    engine.syncWeaponPool(initSlotMeta.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS);
     engine.startLoop();
     engine.loadTitlePreview(parsedSeed());
     engine.setState('START_SCREEN');
@@ -285,12 +427,74 @@ export default function App() {
     }
   };
 
+  const handleSelectStarterWeapon = (weaponId: WeaponId) => {
+    setSelectedStarters(([primary, secondary]) => {
+      if (primary === weaponId) {
+        return [secondary, primary];
+      }
+      if (secondary === weaponId) {
+        return [weaponId, primary];
+      }
+      return [weaponId, primary];
+    });
+  };
+
+  const handleUnlockContrabandWeapon = (weaponId: WeaponId) => {
+    const wDef = WEAPONS[weaponId];
+    if (!wDef) return;
+    const unlockedIds = meta.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS;
+    if (unlockedIds.includes(weaponId)) {
+      engineRef.current?.equipHubWeapon(weaponId);
+      return;
+    }
+    if (meta.persistentGold < wDef.unlockCost) {
+      const pool = VANCE_DIALOGUE.insufficientGold;
+      setVanceBark(pool[Math.floor(Math.random() * pool.length)]);
+      return;
+    }
+
+    setMeta((prev) => {
+      const currUnlocked = prev.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS;
+      if (currUnlocked.includes(weaponId) || prev.persistentGold < wDef.unlockCost) return prev;
+      const nextWeapons = [...currUnlocked, weaponId];
+      const nextLoreSet = new Set(prev.unlockedLoreIds ?? []);
+      nextLoreSet.add('NPC_BARNABY_VANCE');
+      const weaponLoreId = `WEAPON_${weaponId}`;
+      if (LORE_CATALOG_MAP[weaponLoreId]) {
+        nextLoreSet.add(weaponLoreId);
+      }
+      const next: MetaProgress = {
+        ...prev,
+        persistentGold: prev.persistentGold - wDef.unlockCost,
+        unlockedWeaponIds: nextWeapons,
+        unlockedLoreIds: Array.from(nextLoreSet),
+        lastUnlockedLoreId: LORE_CATALOG_MAP[weaponLoreId] ? weaponLoreId : prev.lastUnlockedLoreId,
+      };
+      saveSlotMeta(activeSlotRef.current, next);
+      const pool =
+        nextWeapons.length >= LOOTABLE_WEAPONS.length
+          ? VANCE_DIALOGUE.maxedOut
+          : VANCE_DIALOGUE.purchaseConfirmed;
+      setVanceBark(pool[Math.floor(Math.random() * pool.length)]);
+      return next;
+    });
+    engineRef.current?.equipHubWeapon(weaponId);
+  };
+
+  const handleEquipForRangeTest = (weaponId: WeaponId) => {
+    engineRef.current?.equipHubWeapon(weaponId);
+    const wDef = WEAPONS[weaponId];
+    setVanceBark(
+      `"${wDef.name} racked into your primary harness! Step over to the Target Range right behind you and give those dummy plates a proper thrashing."`
+    );
+  };
+
   const handleStartRun = () => {
     enterImmersiveFullscreen();
     const s = parsedSeed();
     setPreviousSeed(String(s));
     setSeedInput(String(randomSeed()));
-    engineRef.current?.startNewRun(selectedClass, s, meta);
+    engineRef.current?.startNewRun(selectedClass, s, meta, selectedStarters);
   };
 
   const handleStartBossRun = () => {
@@ -298,13 +502,14 @@ export default function App() {
     const s = parsedSeed();
     setPreviousSeed(String(s));
     setSeedInput(String(randomSeed()));
-    engineRef.current?.startBossRun(selectedClass, s, meta, 10);
+    engineRef.current?.startBossRun(selectedClass, s, meta, 10, selectedStarters);
   };
 
   const handleToggleMute = () => {
     const next = !muted;
     setMuted(next);
     sfx.setMuted(next);
+    rockMusic.setMuted(next);
   };
 
   const handleResume = () => {
@@ -329,6 +534,29 @@ export default function App() {
         ...prev,
         persistentGold: prev.persistentGold - cost,
         [key]: (prev[key] as number) + 1,
+      };
+      saveSlotMeta(activeSlot, next);
+      return next;
+    });
+  };
+
+  const handleBuyClemencyUpgrade = (upgradeId: ClemencyUpgradeId) => {
+    const def = CLEMENCY_UPGRADES[upgradeId];
+    if (!def) return;
+    const seals = meta.clemencySeals ?? 0;
+    const currentLv = meta.clemencyUpgradeLevels?.[upgradeId] ?? 0;
+    if (seals < def.sealCost || currentLv >= def.maxRank) return;
+    setMeta((prev) => {
+      const prevSeals = prev.clemencySeals ?? 0;
+      const prevLv = prev.clemencyUpgradeLevels?.[upgradeId] ?? 0;
+      if (prevSeals < def.sealCost || prevLv >= def.maxRank) return prev;
+      const next: MetaProgress = {
+        ...prev,
+        clemencySeals: prevSeals - def.sealCost,
+        clemencyUpgradeLevels: {
+          ...(prev.clemencyUpgradeLevels ?? {}),
+          [upgradeId]: prevLv + 1,
+        },
       };
       saveSlotMeta(activeSlot, next);
       return next;
@@ -737,6 +965,22 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          {/* Dynamic Strata Chain-Reaction / Bastion Archive Callout Banner */}
+          {hud.strataAlert && (
+            <div className="mx-auto mt-1 max-w-2xl px-3.5 py-1.5 rounded-lg border text-center text-xs sm:text-sm font-medium shadow-lg transition-all"
+              style={{
+                backgroundColor: activePalette.panelBg,
+                borderColor: activePalette.accentHex,
+                color: '#F4F4F5',
+              }}
+            >
+              <span className="font-semibold mr-1.5" style={{ color: activePalette.accentSoftHex }}>
+                ◈
+              </span>
+              {hud.strataAlert}
+            </div>
+          )}
 
           {/* Bottom Controls Area */}
           <div className="flex flex-col items-center gap-2 w-full">
@@ -1243,6 +1487,82 @@ export default function App() {
                   </div>
                 );
               })()}
+
+              {/* Royal Clemency Decrees (Permanent Meta-Upgrades) */}
+              <div className="pt-3 border-t border-white/10 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-amber-300 uppercase tracking-wider">
+                      Royal Clemency Decrees
+                    </div>
+                    <div className="text-[11px] text-zinc-400">
+                      Permanent sovereign blessings earned by shattering the Sovereign Spire on Depth 30
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono-tabular px-2.5 py-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 shrink-0">
+                    ✦ {meta.clemencySeals ?? 0} Clemency Seals
+                  </span>
+                </div>
+
+                {Object.values(CLEMENCY_UPGRADES).map((upg) => {
+                  const lv = meta.clemencyUpgradeLevels?.[upg.id] ?? 0;
+                  const isMax = lv >= upg.maxRank;
+                  const canUnlock = !isMax && (meta.clemencySeals ?? 0) >= upg.sealCost;
+                  return (
+                    <div
+                      key={upg.id}
+                      className="bg-[#0C0E12] border border-white/10 rounded-lg p-3.5 flex items-center justify-between gap-4"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold" style={{ color: upg.accentColor }}>
+                            {upg.name}
+                          </span>
+                          <span className="text-[11px] font-mono-tabular text-zinc-400">
+                            Rank {lv}/{upg.maxRank}
+                          </span>
+                        </div>
+                        <div className="text-xs text-zinc-400 mt-0.5">{upg.description}</div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!canUnlock}
+                        onClick={() => handleBuyClemencyUpgrade(upg.id)}
+                        className={`min-h-[36px] px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors shrink-0 ${
+                          isMax
+                            ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 cursor-default'
+                            : canUnlock
+                              ? 'bg-emerald-400 hover:bg-emerald-300 text-zinc-950'
+                              : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                        }`}
+                      >
+                        {isMax ? 'Max Rank' : `Invoke (${upg.sealCost} ✦)`}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Foundational Meta-Progression Armory & Relic Registry */}
+              <div className="pt-3 border-t border-white/10">
+                <div className="bg-[#0C0E12] border border-white/10 rounded-lg p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div>
+                    <div className="font-semibold text-zinc-200">Bastion Meta-Progression Registry</div>
+                    <div className="text-[11px] text-zinc-400 mt-0.5">
+                      Persistent pool of discovered armaments & bound relics across runs
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 font-mono-tabular">
+                    <span className="text-amber-300">
+                      {(meta.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS).length}/24 Weapons
+                    </span>
+                    <span aria-hidden="true" className="text-zinc-600">·</span>
+                    <span className="text-purple-300">
+                      {(meta.unlockedRelicIds ?? STARTER_UNLOCKED_RELICS).length}/6 Boss Relics
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1251,7 +1571,7 @@ export default function App() {
       {/* Expedition Staging Modal */}
       {gameState === 'HUB_WORLD' && activeHubModal === 'EXPEDITION' && !isPortrait && (
         <div className="fixed inset-0 z-30 bg-black/80 flex items-center justify-center p-4">
-          <div className="w-full max-w-xl bg-[#141820] border border-white/15 rounded-xl p-6 shadow-2xl">
+          <div className="w-full max-w-2xl bg-[#141820] border border-white/15 rounded-xl p-6 shadow-2xl max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-white/10">
               <h2 className="font-display text-2xl font-bold text-white">Expedition Portal Staging</h2>
               <button
@@ -1280,6 +1600,68 @@ export default function App() {
                       >
                         <div className="font-semibold text-xs sm:text-sm text-white">{cls.name}</div>
                         <div className="text-[11px] text-zinc-400 mt-1">{cls.maxHp + meta.maxHpLevel * 25} HP</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Pick 2 of 3 Starter Weapons */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+                    Select 2 of 3 Starter Weapons (Primary & Secondary)
+                  </h3>
+                  <span className="text-[11px] font-mono-tabular text-amber-300">
+                    Click any starter to promote to Primary
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {STARTER_UNLOCKED_WEAPONS.map((wid) => {
+                    const w = WEAPONS[wid];
+                    const isPrimary = selectedStarters[0] === wid;
+                    const isSecondary = selectedStarters[1] === wid;
+                    const selected = isPrimary || isSecondary;
+                    return (
+                      <button
+                        key={wid}
+                        type="button"
+                        onClick={() => handleSelectStarterWeapon(wid)}
+                        className={`text-left p-3 rounded-lg border transition-colors flex flex-col justify-between gap-2 ${
+                          isPrimary
+                            ? 'bg-amber-500/20 border-amber-500 text-white'
+                            : isSecondary
+                              ? 'bg-sky-500/15 border-sky-400/70 text-white'
+                              : 'bg-[#0C0E12] border-white/10 text-zinc-300 hover:border-white/25'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="font-semibold text-xs sm:text-sm" style={{ color: w.color }}>
+                              {w.name}
+                            </span>
+                            <span
+                              className={`text-[10px] font-mono-tabular font-semibold px-1.5 py-0.5 rounded ${
+                                isPrimary
+                                  ? 'bg-amber-500 text-zinc-950'
+                                  : isSecondary
+                                    ? 'bg-sky-400 text-zinc-950'
+                                    : 'bg-zinc-800 text-zinc-400'
+                              }`}
+                            >
+                              {isPrimary ? 'Primary' : isSecondary ? 'Secondary' : 'Standby'}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-[11px] font-mono-tabular text-zinc-400">
+                            {DAMAGE_TYPE_LABELS[w.damageType]} · {w.damage} Dmg
+                          </div>
+                          <p className="mt-1.5 text-[11px] text-zinc-300 leading-snug line-clamp-2">
+                            {w.description}
+                          </p>
+                        </div>
+                        <div className="text-[10px] font-mono-tabular text-zinc-400 pt-1 border-t border-white/10">
+                          {selected ? 'Equipped for drop' : 'Click to equip as Primary'}
+                        </div>
                       </button>
                     );
                   })}
@@ -1342,6 +1724,449 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Master-Factor Barnaby Vance's Contraband Workbench Modal */}
+      {gameState === 'HUB_WORLD' && activeHubModal === 'CONTRABAND' && !isPortrait && (() => {
+        const unlockedIds = meta.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS;
+        const unlockedSet = new Set<WeaponId>(unlockedIds);
+        const allWeapons = Object.values(WEAPONS);
+        const tierWeapons = allWeapons.filter((w) => w.tier === contrabandTier);
+
+        return (
+          <div className="fixed inset-0 z-30 bg-black/80 flex items-center justify-center p-3 sm:p-6">
+            <div className="w-full max-w-4xl bg-[#141820] border border-amber-500/35 rounded-xl p-5 sm:p-6 shadow-2xl flex flex-col max-h-[88dvh]">
+              {/* Header */}
+              <div className="flex items-center justify-between gap-4 pb-4 border-b border-white/10 shrink-0">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <h2 className="font-display text-xl sm:text-2xl font-bold text-white">
+                      {VANCE_DIALOGUE.workbenchTitle}
+                    </h2>
+                    <span className="text-xs font-mono-tabular px-2.5 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300">
+                      🪙 {meta.persistentGold} Vaelic Gold
+                    </span>
+                    <span className="text-xs font-mono-tabular px-2.5 py-1 rounded-md border border-sky-500/35 bg-sky-500/10 text-sky-300">
+                      {unlockedIds.length}/{allWeapons.length} Ordnance Unsealed
+                    </span>
+                  </div>
+                  <div className="text-xs text-zinc-400 mt-1">
+                    Master-Factor Barnaby Vance · Quartermaster of Seized Contraband & Experimental Salvage
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveHubModal('NONE')}
+                  aria-label="Close Contraband Workbench"
+                  className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-white/10 text-zinc-300 hover:text-white transition-colors shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Barnaby Vance Live Bark & Pedestal Tooltip Banner */}
+              <div className="mt-3 p-3.5 rounded-lg bg-[#0C0E12] border border-amber-500/30 shrink-0 space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono-tabular text-amber-300">
+                  <span>MASTER-FACTOR BARNABY VANCE · UPPER EAST TARGET RANGE</span>
+                  <span className="text-zinc-400">{VANCE_DIALOGUE.workbenchFlavor}</span>
+                </div>
+                <p className="text-xs sm:text-sm text-zinc-100 italic leading-relaxed">
+                  {vanceBark}
+                </p>
+              </div>
+
+              {/* Tier Filter Tabs */}
+              <div className="mt-3 flex items-center gap-1.5 p-1 bg-[#0C0E12] border border-white/10 rounded-lg shrink-0 overflow-x-auto">
+                {([1, 2, 3] as WeaponTier[]).map((t) => {
+                  const tList = allWeapons.filter((w) => w.tier === t);
+                  const tUnlocked = tList.filter((w) => unlockedSet.has(w.id)).length;
+                  const isActive = contrabandTier === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setContrabandTier(t)}
+                      className={`flex-1 min-h-[38px] px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 flex items-center justify-center gap-2 ${
+                        isActive
+                          ? 'bg-amber-500 text-zinc-950'
+                          : 'text-zinc-300 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <span>{WEAPON_TIER_LABELS[t].title}</span>
+                      <span
+                        className={`font-mono-tabular text-[11px] ${
+                          isActive ? 'text-zinc-900/80' : 'text-zinc-400'
+                        }`}
+                      >
+                        {tUnlocked}/{tList.length}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Tier Ordnance Grid */}
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 overflow-y-auto pr-1 flex-1 min-h-0">
+                {tierWeapons.map((w) => {
+                  const isUnlocked = unlockedSet.has(w.id);
+                  const canAfford = meta.persistentGold >= w.unlockCost;
+                  const loreEntry = LORE_CATALOG_MAP[`WEAPON_${w.id}`];
+                  return (
+                    <div
+                      key={w.id}
+                      className={`p-3.5 rounded-lg border flex flex-col justify-between gap-3 transition-colors ${
+                        isUnlocked
+                          ? 'bg-[#0C0E12] border-emerald-500/35'
+                          : 'bg-[#0C0E12]/90 border-white/10 hover:border-amber-500/35'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="font-display font-bold text-sm sm:text-base"
+                                style={{ color: w.color }}
+                              >
+                                {w.name}
+                              </span>
+                              {w.isStarter && (
+                                <span className="text-[10px] font-mono-tabular px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300">
+                                  Starter Issue
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 text-[11px] font-mono-tabular text-zinc-400">
+                              {DAMAGE_TYPE_LABELS[w.damageType]} · {w.damage} Dmg · {w.cooldown}s Cycle ·{' '}
+                              {w.blastRadius}px Blast
+                            </div>
+                          </div>
+                          <span
+                            className={`text-[10px] font-mono-tabular font-semibold px-2 py-0.5 rounded border shrink-0 ${
+                              isUnlocked
+                                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                : 'bg-zinc-800/80 border-white/10 text-zinc-400'
+                            }`}
+                          >
+                            {isUnlocked ? 'UNSEALED' : `${w.unlockCost} 🪙`}
+                          </span>
+                        </div>
+
+                        <p className="mt-2 text-xs text-zinc-200 leading-relaxed">
+                          {w.description}
+                        </p>
+
+                        {loreEntry?.quote && (
+                          <p className="mt-2 text-[11px] text-zinc-400 italic leading-snug">
+                            {loreEntry.quote}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-mono-tabular text-zinc-400">
+                          {isUnlocked
+                            ? 'In active run drop & pedestal pool'
+                            : 'Locked in Vance’s contraband crate'}
+                        </span>
+                        {isUnlocked ? (
+                          <button
+                            type="button"
+                            onClick={() => handleEquipForRangeTest(w.id)}
+                            className="min-h-[34px] px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-xs font-semibold transition-colors shrink-0"
+                          >
+                            Equip for Range Test
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleUnlockContrabandWeapon(w.id)}
+                            className={`min-h-[34px] px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors shrink-0 ${
+                              canAfford
+                                ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950'
+                                : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-white/10'
+                            }`}
+                          >
+                            Unseal ({w.unlockCost} 🪙)
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Ancient Tome Glossary Modal (Bastion Archive Pedestal beside The Archivist) */}
+      {gameState === 'HUB_WORLD' && activeHubModal === 'TOME' && !isPortrait && (() => {
+        const unlockedIds = meta.unlockedLoreIds ?? [];
+        const unlockedSet = new Set(unlockedIds);
+        const categoryPages = LORE_CATALOG.filter((p) => p.category === tomeCategory);
+        const activePage =
+          categoryPages.find((p) => p.id === selectedLoreId) ??
+          categoryPages[0] ??
+          LORE_CATALOG[0];
+        const isPageUnlocked = activePage ? unlockedSet.has(activePage.id) : false;
+
+        return (
+          <div className="fixed inset-0 z-30 bg-black/80 flex items-center justify-center p-3 sm:p-6">
+            <div className="w-full max-w-4xl bg-[#141820] border border-amber-500/30 rounded-xl p-5 sm:p-6 shadow-2xl flex flex-col max-h-[88dvh]">
+              {/* Header */}
+              <div className="flex items-center justify-between gap-4 pb-4 border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/15 border border-amber-500/35 flex items-center justify-center text-amber-300 shrink-0">
+                    <BookOpen className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="font-display text-xl sm:text-2xl font-bold text-white truncate">
+                      Tome of Fractured Annals
+                    </h2>
+                    <div className="flex items-center gap-2 text-xs text-zinc-400 font-mono-tabular">
+                      <span>Bastion Archive Glossary</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="text-amber-300 font-semibold">
+                        {unlockedIds.length} / {LORE_CATALOG.length} Pages Bound
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveHubModal('NONE')}
+                  aria-label="Close Tome Glossary"
+                  className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg bg-white/10 text-zinc-300 hover:text-white transition-colors shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Crown Exchequery Blood-Debt & Royal Clemency Ledger Bar */}
+              <div className="mt-3 px-3.5 py-2.5 rounded-lg bg-[#0C0E12] border border-amber-500/25 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 font-mono-tabular text-zinc-300">
+                  <span>
+                    Blood-Debt Sentence:{' '}
+                    <strong className="text-white">
+                      Depth {Math.min(30, meta.bestDepth)}/30
+                    </strong>
+                  </span>
+                  <span aria-hidden="true" className="text-zinc-600">·</span>
+                  <span>
+                    Vaelic Gold Remitted:{' '}
+                    <strong className="text-amber-300">
+                      {(meta.totalGoldRemitted ?? meta.persistentGold).toLocaleString()}g
+                    </strong>
+                  </span>
+                  <span aria-hidden="true" className="hidden sm:inline text-zinc-600">·</span>
+                  <span className="hidden sm:inline">
+                    Registry:{' '}
+                    <strong className="text-sky-300">
+                      {(meta.unlockedWeaponIds ?? STARTER_UNLOCKED_WEAPONS).length}/24 Weapons
+                    </strong>
+                    {' · '}
+                    <strong className="text-purple-300">
+                      {(meta.unlockedRelicIds ?? STARTER_UNLOCKED_RELICS).length}/6 Relics
+                    </strong>
+                  </span>
+                </div>
+                <span
+                  className={`font-mono-tabular text-[11px] font-semibold px-2.5 py-0.5 rounded border ${
+                    meta.clemencyGranted || meta.bestDepth >= 30
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                      : 'bg-amber-500/10 border-amber-500/35 text-amber-300'
+                  }`}
+                >
+                  {meta.clemencyGranted || meta.bestDepth >= 30
+                    ? `ROYAL CLEMENCY GRANTED · ${meta.clemencyCount ?? 1}x`
+                    : 'PENAL DEBT ACTIVE'}
+                </span>
+              </div>
+
+              {/* Category Filter Tabs */}
+              <div className="mt-3 flex items-center gap-1.5 p-1 bg-[#0C0E12] border border-white/10 rounded-lg shrink-0 overflow-x-auto">
+                {(['WORLD_STRATA', 'BESTIARY', 'ARSENAL'] as LoreCategory[]).map((cat) => {
+                  const catPages = LORE_CATALOG.filter((p) => p.category === cat);
+                  const catUnlocked = catPages.filter((p) => unlockedSet.has(p.id)).length;
+                  const isActive = tomeCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        setTomeCategory(cat);
+                        const firstUnlocked = catPages.find((p) => unlockedSet.has(p.id));
+                        setSelectedLoreId((firstUnlocked ?? catPages[0]).id);
+                      }}
+                      className={`flex-1 min-h-[38px] px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 flex items-center justify-center gap-2 ${
+                        isActive
+                          ? 'bg-amber-500 text-zinc-950'
+                          : 'text-zinc-300 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <span>{LORE_CATEGORY_LABELS[cat]}</span>
+                      <span
+                        className={`font-mono-tabular text-[11px] ${
+                          isActive ? 'text-zinc-900/80' : 'text-zinc-400'
+                        }`}
+                      >
+                        {catUnlocked}/{catPages.length}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Two-Column Open Folio Layout */}
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-12 gap-4 flex-1 min-h-0 overflow-hidden">
+                {/* Left Column: Chapter Index */}
+                <div className="md:col-span-5 bg-[#0C0E12] border border-white/10 rounded-lg p-2.5 overflow-y-auto space-y-1.5 max-h-[34dvh] md:max-h-none">
+                  {categoryPages.map((page, idx) => {
+                    const unlocked = unlockedSet.has(page.id);
+                    const selected = activePage?.id === page.id;
+                    const isNewest = meta.lastUnlockedLoreId === page.id;
+                    return (
+                      <button
+                        key={page.id}
+                        type="button"
+                        onClick={() => setSelectedLoreId(page.id)}
+                        className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors flex items-start justify-between gap-2.5 ${
+                          selected
+                            ? 'bg-amber-500/15 border-amber-500/60 text-white'
+                            : 'bg-[#141820]/60 border-white/5 hover:border-white/20 text-zinc-300'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold">
+                            <span className="font-mono-tabular text-zinc-500">
+                              {String(idx + 1).padStart(2, '0')}.
+                            </span>
+                            <span
+                              className="truncate"
+                              style={{ color: unlocked ? page.accentColor : '#9CA3AF' }}
+                            >
+                              {unlocked ? page.title : 'Unrecovered Folio Page'}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-zinc-400 truncate">
+                            {unlocked ? page.subtitle : page.unlockHint}
+                          </div>
+                        </div>
+                        <div className="shrink-0 pt-0.5 flex items-center gap-1">
+                          {unlocked ? (
+                            isNewest ? (
+                              <span className="text-[10px] font-mono-tabular text-amber-300">
+                                New
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-mono-tabular text-emerald-400">
+                                Bound
+                              </span>
+                            )
+                          ) : (
+                            <Lock className="w-3.5 h-3.5 text-zinc-500" />
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Right Column: Illuminated Folio Page Reader */}
+                <div className="md:col-span-7 bg-[#0C0E12] border border-white/10 rounded-lg p-4 sm:p-5 overflow-y-auto flex flex-col justify-between gap-4">
+                  {activePage && isPageUnlocked ? (
+                    <>
+                      <div className="space-y-3">
+                        <div className="pb-3 border-b border-white/10">
+                          <div className="flex items-center gap-2 text-xs text-zinc-400">
+                            <span style={{ color: activePage.accentColor }}>
+                              {LORE_CATEGORY_LABELS[activePage.category]}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span>{activePage.subtitle}</span>
+                          </div>
+                          <h3 className="mt-1 font-display text-xl sm:text-2xl font-bold text-white">
+                            {activePage.title}
+                          </h3>
+                          {activePage.statsLine && (
+                            <div className="mt-2 text-xs font-mono-tabular text-amber-300/95">
+                              {activePage.statsLine}
+                            </div>
+                          )}
+                        </div>
+
+                        {activePage.tooltip && (
+                          <div
+                            className="px-3 py-2 rounded-lg border text-xs sm:text-sm font-medium"
+                            style={{
+                              borderColor: `${activePage.accentColor}55`,
+                              backgroundColor: `${activePage.accentColor}14`,
+                              color: '#F4F4F5',
+                            }}
+                          >
+                            <span
+                              className="font-mono-tabular text-[11px] uppercase tracking-wider mr-2 font-semibold"
+                              style={{ color: activePage.accentColor }}
+                            >
+                              Codex Function:
+                            </span>
+                            {activePage.tooltip}
+                          </div>
+                        )}
+
+                        {activePage.quote && (
+                          <blockquote
+                            className="pl-3.5 py-1.5 border-l-2 text-xs sm:text-sm italic text-amber-200/90 leading-relaxed"
+                            style={{ borderColor: activePage.accentColor }}
+                          >
+                            {activePage.quote}
+                          </blockquote>
+                        )}
+
+                        <div className="space-y-2.5 text-xs sm:text-sm text-zinc-200 leading-relaxed">
+                          {activePage.body.map((paragraph, pIdx) => (
+                            <p key={pIdx}>{paragraph}</p>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* The Archivist's Margin Commentary */}
+                      <div className="pt-3 border-t border-white/10">
+                        <div className="text-[11px] font-semibold text-sky-300">
+                          The Archivist’s Margin Note
+                        </div>
+                        <p className="mt-1 text-xs text-zinc-300 italic leading-relaxed">
+                          {activePage.archivistRemark.replace(/^Archivist:\s*/, '')}
+                        </p>
+                      </div>
+                    </>
+                  ) : activePage ? (
+                    <div className="my-auto py-8 text-center space-y-3">
+                      <div className="mx-auto w-11 h-11 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400">
+                        <Lock className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs text-zinc-400">
+                          {LORE_CATEGORY_LABELS[activePage.category]} · Missing Entry
+                        </div>
+                        <h3 className="mt-1 font-display text-lg sm:text-xl font-bold text-zinc-200">
+                          Unrecovered Folio Page
+                        </h3>
+                      </div>
+                      <p className="max-w-md mx-auto text-xs sm:text-sm text-zinc-400 leading-relaxed">
+                        This page has not yet been bound into the Tome.
+                      </p>
+                      <div className="max-w-md mx-auto pt-2 text-xs font-mono-tabular text-amber-300/90">
+                        How to Uncover: {activePage.unlockHint}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Pause Modal */}
       {gameState === 'PAUSED' && !isPortrait && (

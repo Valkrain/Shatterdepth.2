@@ -1,6 +1,12 @@
 import { buildBossSpecialList, countBossPartPixels } from './bossSpecials';
 import { getBiomeForDepth, LOOTABLE_WEAPONS } from './catalog';
-import { PixelWorld } from './PixelWorld';
+import {
+  META_ACID_DRIP_STONE,
+  META_PRESSURIZED_OIL,
+  META_THERMAL_FAULT,
+  META_VOLATILE_CRYSTAL,
+  PixelWorld,
+} from './PixelWorld';
 import { fbm2D, jitterColor, packColor, SeededRNG, tintColor } from './prng';
 import {
   BiomeConfig,
@@ -22,6 +28,7 @@ import {
   PixelBoss,
   Portal,
   RelicPedestal,
+  WeaponId,
   WORLD_H,
   WORLD_W,
 } from './types';
@@ -119,7 +126,14 @@ interface Waypoint {
   kind: RoomKind;
 }
 
-export function generateLevel(world: PixelWorld, seed: number, depth: number): GeneratedLevel {
+export function generateLevel(
+  world: PixelWorld,
+  seed: number,
+  depth: number,
+  unlockedWeapons?: WeaponId[]
+): GeneratedLevel {
+  const activePool =
+    unlockedWeapons && unlockedWeapons.length > 0 ? unlockedWeapons : LOOTABLE_WEAPONS;
   const levelSeed = (seed ^ (depth * 2654435761)) >>> 0;
   const rng = new SeededRNG(levelSeed);
   const biome = getBiomeForDepth(depth, seed);
@@ -187,12 +201,12 @@ export function generateLevel(world: PixelWorld, seed: number, depth: number): G
 
   // Sanctuary / Shop / Rare Event Level every 10 depths ending in 5 (Depth 5, 15, 25...)
   if (depth > 0 && depth % 10 === 5) {
-    return generateSanctuaryLevel(world, biome, depth, rng);
+    return generateSanctuaryLevel(world, biome, depth, rng, activePool);
   }
 
   // Boss Floor every 10 depths!
   if (depth > 0 && depth % 10 === 0) {
-    return generateBossLevel(world, biome, depth, rng);
+    return generateBossLevel(world, biome, depth, rng, activePool);
   }
 
   // 2. Varied Macro Path Profile (expanded 1920x512 open multi-route cavern network)
@@ -329,6 +343,7 @@ export function generateLevel(world: PixelWorld, seed: number, depth: number): G
 
   decorateCavernSurfaces(world, biome, rng);
   stampSealedLightPockets(world, waypoints, biome, depth, rng);
+  stampCompromisedStrataFeatures(world, waypoints, biome, depth, rng);
 
   // 4. Populate each waypoint room with destructible architecture, traps, and biome-scaled enemies
   const enemies: Enemy[] = [];
@@ -541,9 +556,23 @@ export function generateLevel(world: PixelWorld, seed: number, depth: number): G
           x: wp.x,
           y: floorY - 2,
           used: false,
-          weaponOffer: rng.pick(LOOTABLE_WEAPONS),
+          weaponOffer: rng.pick(activePool),
         });
         stampCrystalCluster(world, rx + 12, midY - 1, biome, rng, -1);
+      }
+
+      // Spawn physical collectible Lore Page on upper ruin/vault/catacomb shelf
+      if ((i === 3 || i === 6) && rng.chance(0.85)) {
+        pickups.push({
+          id: entityId++,
+          kind: 'LORE_PAGE',
+          x: wp.x - 14,
+          y: midY - 8,
+          vx: 0,
+          vy: 0,
+          value: 1,
+          age: 0,
+        });
       }
 
       enemies.push(makeEnemy(entityId++, pickEnemyKind(depth, biome.id, rng), wp.x + 10, midY - 10, depth));
@@ -632,6 +661,22 @@ export function generateLevel(world: PixelWorld, seed: number, depth: number): G
     }
   }
 
+  // Guarantee at least one hidden Lore Page in every standard level
+  if (!pickups.some((p) => p.kind === 'LORE_PAGE') && waypoints.length > 4) {
+    const loreWp = waypoints[Math.min(waypoints.length - 2, rng.int(2, waypoints.length - 2))];
+    const loreFloor = loreWp.y + Math.floor(loreWp.h * 0.34);
+    pickups.push({
+      id: entityId++,
+      kind: 'LORE_PAGE',
+      x: loreWp.x + rng.int(-18, 18),
+      y: loreFloor - 10,
+      vx: 0,
+      vy: 0,
+      value: 1,
+      age: 0,
+    });
+  }
+
   // Portal shrine frame & skylight beacon
   stampTorch(world, portalWp.x - 22, portalFloorY - 1, rng);
   stampTorch(world, portalWp.x + 22, portalFloorY - 1, rng);
@@ -662,7 +707,8 @@ function generateBossLevel(
   world: PixelWorld,
   biome: BiomeConfig,
   depth: number,
-  rng: SeededRNG
+  rng: SeededRNG,
+  activePool: WeaponId[] = LOOTABLE_WEAPONS
 ): GeneratedLevel {
   const enemies: Enemy[] = [];
   const pickups: Pickup[] = [];
@@ -708,6 +754,7 @@ function generateBossLevel(
   drawFoundationPier(world, portalX + 36, portalFloorY + 11, 12, biome, rng);
 
   decorateCavernSurfaces(world, biome, rng);
+  stampArenaCompromisedStrata(world, arenaMinX, arenaMaxX, arenaFloorY, biome, rng);
 
   // Vestibule supplies: weapon pedestal + jars + torches
   pedestals.push({
@@ -715,7 +762,7 @@ function generateBossLevel(
     x: spawnX + 58,
     y: spawnFloorY - 2,
     used: false,
-    weaponOffer: rng.pick(LOOTABLE_WEAPONS),
+    weaponOffer: rng.pick(activePool),
   });
   stampTorch(world, spawnX - 34, spawnFloorY - 1, rng);
   stampTorch(world, spawnX + 36, spawnFloorY - 1, rng);
@@ -1762,13 +1809,35 @@ function drawBrickBlock(
       const base = jitterColor(biome.brickBase, () => rng.next(), 6);
 
       if (isMortarY || isMortarX) {
-        world.setPixel(px, py, Mat.BRICK, tintColor(base, 0.56));
+        const isThermalStress =
+          (biome.id === 'ASHEN_FOUNDRY' && ((px + py * 3) % 13 === 0)) ||
+          ((px * 3 + py * 5) % 29 === 0);
+        world.setPixel(
+          px,
+          py,
+          Mat.BRICK,
+          tintColor(base, isThermalStress ? 0.42 : 0.56),
+          isThermalStress ? META_THERMAL_FAULT : 0
+        );
+        if (isThermalStress) {
+          world.pixelDmg[py * WORLD_W + px] = biome.id === 'ASHEN_FOUNDRY' ? 15 : 12;
+        }
       } else {
         let shade = brickTone;
         if (inBrickY === 0 || inBrickX === 0) shade *= 1.14; // top-left brick bevel
         else if (inBrickY === 2 || inBrickX === 6) shade *= 0.84; // bottom-right bevel
-        if (brickHash < 14 && inBrickX === 3 && inBrickY === 1) shade *= 0.74; // weathered chip
-        world.setPixel(px, py, Mat.BRICK, tintColor(base, shade));
+        const isFaultBrick = brickHash < 14 && inBrickX === 3 && inBrickY === 1;
+        if (isFaultBrick) shade *= 0.72; // weathered thermal stress chip
+        world.setPixel(
+          px,
+          py,
+          Mat.BRICK,
+          tintColor(base, shade),
+          isFaultBrick ? META_THERMAL_FAULT : 0
+        );
+        if (isFaultBrick) {
+          world.pixelDmg[py * WORLD_W + px] = 13;
+        }
       }
     }
   }
@@ -2350,11 +2419,294 @@ function stampSealedLightPockets(
   }
 }
 
+function stampPressurizedOilPocket(
+  world: PixelWorld,
+  cx: number,
+  cy: number,
+  faceDirY: -1 | 1,
+  biome: BiomeConfig,
+  rng: SeededRNG
+): void {
+  const pw = rng.int(16, 22);
+  const ph = rng.int(10, 14);
+  const x0 = Math.max(14, Math.min(WORLD_W - pw - 14, cx - Math.floor(pw * 0.5)));
+  const y0 = Math.max(16, Math.min(WORLD_H - ph - 16, cy - Math.floor(ph * 0.5)));
+
+  // Verify adequate surrounding solid rock/brick so pocket sits just behind a wall
+  let solidCount = 0;
+  for (let dy = 0; dy < ph; dy += 3) {
+    for (let dx = 0; dx < pw; dx += 4) {
+      const m = world.getMat(x0 + dx, y0 + dy);
+      if (m === Mat.STONE || m === Mat.DIRT || m === Mat.BRICK) solidCount++;
+    }
+  }
+  if (solidCount < 9) return;
+
+  paintInteriorBg(world, x0, y0, pw, ph, biome, rng);
+
+  // Fill pressurized oil core inside a brittle thermally-stressed brick liner
+  for (let py = y0; py < y0 + ph; py++) {
+    for (let px = x0; px < x0 + pw; px++) {
+      const isShell =
+        px <= x0 + 1 ||
+        px >= x0 + pw - 2 ||
+        py <= y0 + 1 ||
+        py >= y0 + ph - 2;
+      if (isShell) {
+        const isSeepageCrack =
+          ((px - x0) % 4 === 1 && (py === y0 || py === y0 + ph - 1)) ||
+          ((py - y0) % 3 === 1 && (px === x0 || px === x0 + pw - 1));
+        const col = isSeepageCrack
+          ? packColor(34, 28, 38)
+          : tintColor(jitterColor(biome.brickBase, () => rng.next(), 7), 0.78);
+        world.setPixel(px, py, Mat.BRICK, col, META_THERMAL_FAULT);
+        world.pixelDmg[py * WORLD_W + px] = isSeepageCrack ? 21 : 16;
+      } else {
+        const col = jitterColor([36, 28, 44], () => rng.next(), 6, 255);
+        world.setPixel(px, py, Mat.OIL, col, META_PRESSURIZED_OIL);
+      }
+    }
+  }
+
+  // Visible surface telltale: oil seepage streak & hairline fracture extending toward the chamber
+  const telltaleY = faceDirY > 0 ? y0 + ph : y0 - 1;
+  for (let s = 0; s < 5; s++) {
+    const sy = telltaleY + faceDirY * s;
+    if (sy <= 6 || sy >= WORLD_H - 7) break;
+    const tx = cx + ((s % 2 === 0 ? 1 : -1) * (s >> 1));
+    const m = world.getMat(tx, sy);
+    if (m === Mat.STONE || m === Mat.BRICK || m === Mat.DIRT) {
+      world.setPixel(tx, sy, Mat.BRICK, packColor(38, 30, 42), META_THERMAL_FAULT);
+      world.pixelDmg[sy * WORLD_W + tx] = 22;
+    } else if (m === Mat.EMPTY) {
+      // Exposed dark oil drip telltale at the fracture mouth
+      world.setPixel(tx, sy, Mat.OIL, packColor(38, 30, 46), 0);
+      break;
+    }
+  }
+}
+
+function stampVolatileCrystalVein(
+  world: PixelWorld,
+  startX: number,
+  startY: number,
+  dirX: number,
+  dirY: number,
+  biome: BiomeConfig,
+  rng: SeededRNG
+): void {
+  let vx = startX;
+  let vy = startY;
+  const len = rng.int(18, 28);
+  const baseRgb = biome.crystalBase;
+  const hotRgb: [number, number, number] = [
+    Math.min(255, baseRgb[0] + 55),
+    Math.min(255, baseRgb[1] + 55),
+    Math.min(255, baseRgb[2] + 65),
+  ];
+
+  for (let i = 0; i < len; i++) {
+    const ix = Math.round(vx);
+    const iy = Math.round(vy);
+    if (ix <= 10 || ix >= WORLD_W - 11 || iy <= 10 || iy >= WORLD_H - 11) break;
+
+    const currentMat = world.getMat(ix, iy);
+    // Stop if we wander too far into open cavern air (keep only 1-2 crystal glint tips exposed!)
+    if (currentMat === Mat.EMPTY && i > 3) break;
+
+    const radius = i < 3 || i > len - 4 ? 1 : 2;
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) > radius + 1) continue;
+        const px = ix + dx;
+        const py = iy + dy;
+        const pm = world.getMat(px, py);
+        // Replace solid stone/dirt/brick or allow a 2px exposed crystal glint tip at the start
+        if (
+          pm === Mat.STONE ||
+          pm === Mat.DIRT ||
+          pm === Mat.BRICK ||
+          (i <= 2 && pm === Mat.EMPTY && Math.abs(dx) + Math.abs(dy) <= 1)
+        ) {
+          const isCore = dx === 0 && dy === 0;
+          const col = isCore
+            ? jitterColor(hotRgb, () => rng.next(), 10)
+            : tintColor(jitterColor(baseRgb, () => rng.next(), 12), 1.12);
+          world.setPixel(px, py, Mat.CRYSTAL, col, META_VOLATILE_CRYSTAL);
+        }
+      }
+    }
+
+    // Occasional short side branch
+    if (i === Math.floor(len * 0.5) && rng.chance(0.65)) {
+      const bAng = Math.atan2(dirY, dirX) + (rng.chance(0.5) ? 1.1 : -1.1);
+      for (let b = 1; b <= 6; b++) {
+        const bx = Math.round(ix + Math.cos(bAng) * b);
+        const by = Math.round(iy + Math.sin(bAng) * b);
+        const bm = world.getMat(bx, by);
+        if (bm === Mat.STONE || bm === Mat.DIRT || bm === Mat.BRICK) {
+          world.setPixel(
+            bx,
+            by,
+            Mat.CRYSTAL,
+            jitterColor(hotRgb, () => rng.next(), 10),
+            META_VOLATILE_CRYSTAL
+          );
+        }
+      }
+    }
+
+    const meander = (rng.next() - 0.5) * 0.75;
+    const ang = Math.atan2(dirY, dirX) + meander;
+    vx += Math.cos(ang) * 1.1;
+    vy += Math.sin(ang) * 1.1;
+  }
+}
+
+function stampHoneycombedAcidCavity(
+  world: PixelWorld,
+  cx: number,
+  ceilY: number,
+  biome: BiomeConfig,
+  rng: SeededRNG
+): void {
+  const hw = rng.int(10, 14);
+  const hh = rng.int(7, 10);
+  const centerY = Math.max(14, ceilY - hh + 2);
+
+  for (let dy = -hh; dy <= hh; dy++) {
+    const py = centerY + dy;
+    if (py <= 6 || py >= WORLD_H - 12) continue;
+    for (let dx = -hw; dx <= hw; dx++) {
+      const px = cx + dx;
+      if (px <= 10 || px >= WORLD_W - 11) continue;
+      const distNorm = (dx * dx) / (hw * hw) + (dy * dy) / (hh * hh);
+      if (distNorm > 1.05) continue;
+
+      const existing = world.getMat(px, py);
+      if (existing !== Mat.STONE && existing !== Mat.DIRT && existing !== Mat.BRICK && existing !== Mat.MOSS) {
+        continue;
+      }
+
+      const cellNoise = ((px * 7 + py * 13) ^ (px >> 1)) & 7;
+      const belowEmpty = world.getMat(px, py + 1) === Mat.EMPTY;
+
+      if (belowEmpty || distNorm > 0.72 || cellNoise >= 3) {
+        // Porous acid-etched limestone shell with weeping acid drip emitters on bottom crust
+        const greenTint: [number, number, number] = [
+          Math.round(biome.stoneBase[0] * 0.78 + 22),
+          Math.min(255, Math.round(biome.stoneBase[1] * 0.85 + 54)),
+          Math.round(biome.stoneBase[2] * 0.75 + 24),
+        ];
+        const isDripPore = belowEmpty && (px % 3 === 0);
+        world.setPixel(
+          px,
+          py,
+          Mat.STONE,
+          jitterColor(greenTint, () => rng.next(), 8),
+          META_ACID_DRIP_STONE
+        );
+        world.pixelDmg[py * WORLD_W + px] = isDripPore ? 34 : 26;
+      } else {
+        // Internal honeycomb micro-pocket filled with corrosive acid
+        world.setPixel(
+          px,
+          py,
+          Mat.ACID,
+          jitterColor([74, 236, 98], () => rng.next(), 12, 240),
+          0
+        );
+      }
+    }
+  }
+}
+
+function stampCompromisedStrataFeatures(
+  world: PixelWorld,
+  waypoints: Waypoint[],
+  biome: BiomeConfig,
+  _depth: number,
+  rng: SeededRNG
+): void {
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+
+    // 1. Honeycombed acid-drip limestone cavity in ceiling above waypoint chamber
+    const ceilY = findCeilingSolidY(world, wp.x + rng.int(-24, 24), wp.y - 12, 92);
+    if (ceilY !== null && ceilY > 18) {
+      if (biome.id === 'SUNKEN_MASONRY' || biome.id === 'VITRIOL_VAULTS' || rng.chance(0.55)) {
+        stampHoneycombedAcidCavity(world, wp.x + rng.int(-22, 22), ceilY, biome, rng);
+      }
+    }
+
+    // 2. Pressurized oil pocket just behind brittle chamber walls/floors
+    if (biome.id === 'ASHEN_FOUNDRY' || rng.chance(0.75)) {
+      const sideY: -1 | 1 = rng.chance(0.5) ? -1 : 1;
+      const ox = Math.max(46, Math.min(WORLD_W - 46, wp.x + rng.int(-42, 42)));
+      const oy =
+        sideY < 0
+          ? Math.max(24, (ceilY ?? wp.y - 45) - rng.int(6, 11))
+          : Math.min(WORLD_H - 28, wp.y + Math.floor(wp.h * 0.36) + rng.int(10, 16));
+      stampPressurizedOilPocket(world, ox, oy, sideY < 0 ? 1 : -1, biome, rng);
+    }
+
+    // 3. Volatile resonance crystal vein threading into wall/ceiling with exposed glint tip
+    const veinSide = rng.chance(0.5) ? -1 : 1;
+    let surfaceX = wp.x + veinSide * Math.floor(wp.w * 0.36);
+    const surfaceY = wp.y + rng.int(-28, 18);
+    // Walk outward from chamber air until hitting solid wall face
+    for (let step = 0; step < 36; step++) {
+      const tx = surfaceX + veinSide * step;
+      if (tx <= 18 || tx >= WORLD_W - 19) break;
+      const tm = world.getMat(tx, surfaceY);
+      if (tm === Mat.STONE || tm === Mat.DIRT || tm === Mat.BRICK) {
+        surfaceX = tx;
+        stampVolatileCrystalVein(
+          world,
+          surfaceX - veinSide,
+          surfaceY,
+          veinSide,
+          rng.range(-0.45, 0.45),
+          biome,
+          rng
+        );
+        break;
+      }
+    }
+  }
+}
+
+function stampArenaCompromisedStrata(
+  world: PixelWorld,
+  arenaMinX: number,
+  arenaMaxX: number,
+  arenaFloorY: number,
+  biome: BiomeConfig,
+  rng: SeededRNG
+): void {
+  const span = arenaMaxX - arenaMinX;
+  for (let k = 1; k <= 4; k++) {
+    const ax = Math.round(arenaMinX + (span * k) / 5);
+    const ceilY = findCeilingSolidY(world, ax, 88, 76);
+    if (ceilY !== null && ceilY > 16) {
+      if (k % 2 === 1) {
+        stampHoneycombedAcidCavity(world, ax, ceilY, biome, rng);
+      } else {
+        stampVolatileCrystalVein(world, ax, ceilY + 1, rng.range(-0.4, 0.4), -1, biome, rng);
+      }
+    }
+    if (k === 2 || k === 3) {
+      stampPressurizedOilPocket(world, ax + rng.int(-24, 24), arenaFloorY + 20, -1, biome, rng);
+    }
+  }
+}
+
 function generateSanctuaryLevel(
   world: PixelWorld,
   biome: BiomeConfig,
   _depth: number,
-  rng: SeededRNG
+  rng: SeededRNG,
+  activePool: WeaponId[] = LOOTABLE_WEAPONS
 ): GeneratedLevel {
   const enemies: Enemy[] = []; // Zero enemies in sanctuary / shop level!
   const pickups: Pickup[] = [];
@@ -2422,7 +2774,7 @@ function generateSanctuaryLevel(
       x: ax,
       y: arenaFloorY - 2,
       used: false,
-      weaponOffer: rng.pick(LOOTABLE_WEAPONS),
+      weaponOffer: rng.pick(activePool),
     });
     if (rng.chance(0.5)) {
       stampJar(world, ax + rng.int(-24, 24), arenaFloorY - 7, rng);
@@ -2430,6 +2782,18 @@ function generateSanctuaryLevel(
       stampCrate(world, ax + rng.int(-24, 24), arenaFloorY - 8, biome, rng);
     }
   }
+
+  // Sanctuary Lore Page resting near the central shrine
+  pickups.push({
+    id: entityId++,
+    kind: 'LORE_PAGE',
+    x: arenaCenterX,
+    y: arenaFloorY - 10,
+    vx: 0,
+    vy: 0,
+    value: 1,
+    age: 0,
+  });
 
   // 4. Procedural Decorations & Lighting
   const torchCount = rng.int(6, 10);
@@ -2816,7 +3180,7 @@ export function generateHubLevel(world: PixelWorld): GeneratedLevel {
   // Braziers across all wings for warm hearth pools & shadow-casting glow
   const brazierSpots: Array<{ x: number; y: number }> = [
     { x: 205, y: 394 },
-    { x: 326, y: 394 },
+    { x: 346, y: 394 },
     { x: 472, y: floorY },
     { x: 604, y: floorY },
     { x: 765, y: floorY },
@@ -2864,14 +3228,16 @@ export function generateHubLevel(world: PixelWorld): GeneratedLevel {
   const spawnX = 815;
   const spawnY = floorY - 16;
 
-  // Interactive Hub Pedestals (preserving IDs 9991 Vault, 9992 Expedition, 9993 Settings)
+  // Interactive Hub Pedestals (9994 Ancient Tome Glossary near Archivist, 9993 Settings, 9991 Vault, 9992 Expedition, 9995 Vance's Contraband Workbench on Upper East Target Range Deck)
   const pedestals: RelicPedestal[] = [
+    { id: 9994, x: 306, y: 394 - 2, used: false },
     { id: 9993, x: 492, y: floorY - 2, used: false },
     { id: 9991, x: 695, y: floorY - 2, used: false },
     { id: 9992, x: 1525, y: 396 - 2, used: false },
+    { id: 9995, x: 1044, y: 303 - 2, used: false },
   ];
 
-  // Mysterious Archivist NPC standing quietly in the West Archive Alcove
+  // Bastion Hub NPCs: The Archivist (West Archive Alcove) & Master-Factor Barnaby Vance (Upper East Target Range Deck)
   const hubNpcs: HubNpc[] = [
     {
       id: 'ARCHIVIST',
@@ -2883,7 +3249,19 @@ export function generateHubLevel(world: PixelWorld): GeneratedLevel {
       idlePhase: 0,
       glowRgb: [165, 226, 240],
       greetCooldown: 0,
-      loreReady: false,
+      loreReady: true,
+    },
+    {
+      id: 'VANCE',
+      name: 'Master-Factor Barnaby Vance',
+      title: 'Quartermaster of Seized Contraband & Experimental Salvage',
+      x: 1012,
+      y: 303,
+      facing: 1,
+      idlePhase: 1.5,
+      glowRgb: [255, 186, 82],
+      greetCooldown: 0,
+      loreReady: true,
     },
   ];
 
@@ -3054,6 +3432,19 @@ export function generateHubLevel(world: PixelWorld): GeneratedLevel {
       rayCount: 48,
       flickerSpeed: 2.8,
       flickerAmp: 0.05,
+    },
+    // Master-Factor Barnaby Vance's Contraband Workbench warm brass & prism glow on Upper East Target Range Deck
+    {
+      x: 1028,
+      y: 288,
+      radius: 78,
+      rgb: [255, 188, 86],
+      intensity: 0.9,
+      volumetric: 0.25,
+      castShadows: true,
+      rayCount: 48,
+      flickerSpeed: 3.8,
+      flickerAmp: 0.07,
     },
   ];
 
